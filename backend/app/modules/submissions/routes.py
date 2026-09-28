@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.models import Project, ProjectStatus, Team, TeamMember, Track, Event, EventStatus, EventParticipant, User
+from app.models import Project, ProjectStatus, Team, TeamMember, Track, Event, EventStatus, EventParticipant, User, EventFormField
 from app.modules.auth.dependencies import current_user, require_roles
+from app.modules.events.access import require_manageable
 from app.shared.errors import err
+from app.shared.audit import record
 from app.shared.clock import utcnow
 from app.modules.submissions.schemas import ProjectCreate, ProjectUpdate, VisibilityUpdate
 import uuid
@@ -17,6 +19,7 @@ def proj_out(p: Project) -> dict:
             "title": p.title, "summary": p.summary, "description": p.description, "repo_url": p.repo_url,
             "demo_url": p.demo_url, "live_url": p.live_url, "thumbnail_url": p.thumbnail_url,
             "status": p.status.value if hasattr(p.status, "value") else str(p.status),
+            "custom_data": p.custom_data or {},
             "submitted_at": f(p.submitted_at), "created_at": f(p.created_at), "updated_at": f(p.updated_at)}
 
 def aware(x):
@@ -47,6 +50,30 @@ async def _validate_common(db, event_id, track_id, team_id):
     if not track or track.event_id != event_id or not track.is_active:
         err(422, "invalid_track", "Invalid track for this event")
 
+async def _form_fields(db, event_id) -> list:
+    res = await db.execute(select(EventFormField).where(EventFormField.event_id == event_id).order_by(EventFormField.created_at))
+    return res.scalars().all()
+
+def _check_custom(fields: list, data: dict):
+    """Enforce organizer-defined required fields at submit time."""
+    data = data or {}
+    for f in fields:
+        v = data.get(f.id)
+        if f.required and (v is None or str(v).strip() == ""):
+            err(422, "validation_error", f"“{f.label}” is required to submit")
+        if v is None or str(v).strip() == "":
+            continue
+        if f.field_type == "number":
+            try:
+                float(str(v))
+            except ValueError:
+                err(422, "validation_error", f"“{f.label}” must be a number")
+        elif f.field_type == "select":
+            if str(v) not in (f.options or []):
+                err(422, "validation_error", f"“{f.label}” has an invalid option")
+        elif len(str(v)) > 5000:
+            err(422, "validation_error", f"“{f.label}” is too long")
+
 @router.get("/submissions")
 async def list_mine(db: AsyncSession = Depends(get_db), user: User = Depends(current_user)):
     res = await db.execute(select(Project, Team).join(TeamMember, TeamMember.team_id == Project.team_id).join(Team, Team.id == Project.team_id).where(TeamMember.user_id == user.id))
@@ -74,7 +101,8 @@ async def create_sub(body: ProjectCreate, db: AsyncSession = Depends(get_db), us
     p = Project(id=f"prj_{uuid.uuid4().hex[:8]}", event_id=event_id, team_id=team_id, track_id=track_id,
                 title=title, summary=body.summary, description=body.description,
                 repo_url=body.repo_url, demo_url=body.demo_url, live_url=body.live_url,
-                thumbnail_url=body.thumbnail_url, status=ProjectStatus.DRAFT, submitted_at=None)
+                thumbnail_url=body.thumbnail_url, custom_data=dict(body.custom_data or {}),
+                status=ProjectStatus.DRAFT, submitted_at=None)
     db.add(p)
     await db.commit()
     await db.refresh(p)
@@ -107,6 +135,10 @@ async def patch_sub(project_id: str, body: ProjectUpdate, db: AsyncSession = Dep
     for k in ("title", "summary", "description", "repo_url", "demo_url", "live_url", "thumbnail_url"):
         if k in update_data:
             setattr(p, k, update_data[k])
+    if "custom_data" in update_data and isinstance(update_data["custom_data"], dict):
+        merged = dict(p.custom_data or {})
+        merged.update(update_data["custom_data"])
+        p.custom_data = merged
     p.updated_at = utcnow()
     await db.commit()
     await db.refresh(p)
@@ -124,6 +156,7 @@ async def submit_proj(project_id: str, db: AsyncSession = Depends(get_db), user:
     await _validate_common(db, p.event_id, p.track_id, p.team_id)
     if not p.title or not p.summary:
         err(422, "validation_error", "Title and summary required to submit")
+    _check_custom(await _form_fields(db, p.event_id), p.custom_data)
     ok, msg = _deadline_open(event)
     if not ok:
         err(403, "deadline_passed", msg)
@@ -147,11 +180,17 @@ async def delete_draft(project_id: str, db: AsyncSession = Depends(get_db), user
     return {"ok": True}
 
 @router.post("/submissions/{project_id}/visibility")
-async def set_visibility(project_id: str, body: VisibilityUpdate, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
+async def set_visibility(project_id: str, body: VisibilityUpdate, request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
     p = await db.get(Project, project_id)
     if not p:
         err(404, "not_found", "Project not found")
+    # Gallery moderation is scoped: only this project's organizers may act.
+    await require_manageable(db, user, p.event_id)
+    was = p.is_visible
     p.is_visible = body.visible
     p.updated_at = utcnow()
     await db.commit()
+    await record(user, "project.visibility_changed", target_type="project", target_id=p.id,
+                 event_id=p.event_id, detail={"title": p.title, "from": was, "to": body.visible},
+                 request=request)
     return {"ok": True, "is_visible": p.is_visible}

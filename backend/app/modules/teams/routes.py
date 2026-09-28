@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import timedelta
@@ -6,6 +6,7 @@ from app.database import get_db
 from app.models import Team, TeamMember, TeamRole, TeamInvite, Event, EventParticipant, User
 from app.modules.auth.dependencies import current_user
 from app.shared.errors import err
+from app.shared.audit import record
 from app.shared.security import sha256_hex, utcnow
 import secrets, uuid
 
@@ -19,6 +20,11 @@ async def _members(db: AsyncSession, team_id: str):
     res = await db.execute(select(TeamMember, User).join(User, User.id == TeamMember.user_id).where(TeamMember.team_id == team_id))
     return [(m.user_id, u.email, u.display_name, m.role.value if hasattr(m.role, "value") else str(m.role)) for m, u in res.all()]
 
+async def _require_event_manager(db: AsyncSession, event_id: str, user) -> bool:
+    """Staff may only step outside the participant flow for their own events."""
+    from app.modules.events.access import manages_event
+    return await manages_event(db, user, await db.get(Event, event_id))
+
 async def _require_event_member(db: AsyncSession, event_id: str, user_id: str):
     res = await db.execute(select(EventParticipant).where(EventParticipant.event_id == event_id, EventParticipant.user_id == user_id))
     return res.scalar_one_or_none() is not None
@@ -26,6 +32,12 @@ async def _require_event_member(db: AsyncSession, event_id: str, user_id: str):
 async def _user_team_for_event(db: AsyncSession, event_id: str, user_id: str):
     res = await db.execute(select(Team, TeamMember).join(TeamMember, TeamMember.team_id == Team.id).where(Team.event_id == event_id, TeamMember.user_id == user_id))
     return res.first()
+
+async def _team_locked(db: AsyncSession, team_id: str) -> bool:
+    """Roster is frozen once the team has a SUBMITTED project."""
+    from app.models import Project, ProjectStatus
+    res = await db.execute(select(Project).where(Project.team_id == team_id, Project.status == ProjectStatus.SUBMITTED).limit(1))
+    return res.scalar_one_or_none() is not None
 
 @router.get("/teams")
 async def my_teams(db: AsyncSession = Depends(get_db), user: User = Depends(current_user)):
@@ -45,6 +57,8 @@ async def create_team(event_id: str, body: dict, db: AsyncSession = Depends(get_
     name = (body.get("name") or "").strip()
     if not name:
         err(422, "validation_error", "Team name required")
+    if len(name) > 100:
+        err(422, "validation_error", "Team name is too long")
     import uuid as _u
     t = Team(id=f"tm_{_u.uuid4().hex[:8]}", event_id=event_id, name=name, created_by=user.id)
     db.add(t)
@@ -59,7 +73,8 @@ async def get_team(team_id: str, db: AsyncSession = Depends(get_db), user: User 
     if not t:
         err(404, "not_found", "Team not found")
     res = await db.execute(select(TeamMember).where(TeamMember.team_id == team_id, TeamMember.user_id == user.id))
-    if not res.scalar_one_or_none() and user.role not in ("ORGANIZER", "ADMIN"):
+    # A member sees the roster; an outsider only if they run this event.
+    if not res.scalar_one_or_none() and not await _require_event_manager(db, t.event_id, user):
         err(403, "forbidden", "Not a team member")
     return {"team": team_out(t, await _members(db, team_id))}
 
@@ -71,9 +86,11 @@ async def create_invite(team_id: str, db: AsyncSession = Depends(get_db), user: 
     res = await db.execute(select(TeamMember).where(TeamMember.team_id == team_id, TeamMember.user_id == user.id))
     m = res.scalar_one_or_none()
     if not m or (m.role.value if hasattr(m.role, "value") else str(m.role)) != "CAPTAIN":
-        # allow organizer/admin?
-        if user.role not in ("ORGANIZER", "ADMIN"):
+        # Captain, or an organizer of this event (not merely any organizer).
+        if not await _require_event_manager(db, t.event_id, user):
             err(403, "forbidden", "Only captain can generate invites")
+    if await _team_locked(db, team_id):
+        err(409, "invalid_state_transition", "Team roster is locked after submission")
     # revoke previous active
     res2 = await db.execute(select(TeamInvite).where(TeamInvite.team_id == team_id, TeamInvite.revoked_at.is_(None), TeamInvite.used_at.is_(None)))
     for inv in res2.scalars().all():
@@ -82,6 +99,8 @@ async def create_invite(team_id: str, db: AsyncSession = Depends(get_db), user: 
     inv = TeamInvite(team_id=team_id, token_hash=sha256_hex(raw), created_by=user.id)
     db.add(inv)
     await db.commit()
+    await record(user, "team.invite_created", target_type="team", target_id=team_id, event_id=t.event_id,
+                 detail={"team": t.name}, request=request)
     return {"invite_url": f"/teams/join/{raw}", "token": raw}
 
 @router.post("/teams/join/{token}")
@@ -105,6 +124,8 @@ async def join_by_token(token: str, db: AsyncSession = Depends(get_db), user: Us
     t = await db.get(Team, inv.team_id)
     if not t:
         err(404, "not_found", "Team no longer exists")
+    if await _team_locked(db, t.id):
+        err(409, "invalid_state_transition", "This team has already submitted; its roster is locked")
     # one team per event rule
     if await _user_team_for_event(db, t.event_id, user.id):
         # if already in this team -> idempotent ok

@@ -3,11 +3,13 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api, fetchMe } from "@/lib/api";
 import { I } from "@/components/art";
+import CustomAnswers from "@/components/CustomAnswers";
 
 function NewSubInner({ preselectTeam }: { preselectTeam: string }) {
   const [teams, setTeams] = useState<any[]>([]);
   const [tracks, setTracks] = useState<any[]>([]);
   const [f, setF] = useState({ team_id: "", event_id: "", track_id: "", title: "", summary: "", repo_url: "", description: "" });
+  const [custom, setCustom] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [noTeam, setNoTeam] = useState(false);
@@ -55,6 +57,7 @@ function NewSubInner({ preselectTeam }: { preselectTeam: string }) {
   async function onTeam(id: string) {
     const t = teams.find((x) => x.id === id);
     setF({ ...f, team_id: t.id, event_id: t.event_id, track_id: "" });
+    setCustom({});
     try { setTracks((await api(`/events/${t.event_id}/tracks`)).tracks?.filter((x: any) => x.is_active) || []); } catch {}
   }
 
@@ -63,7 +66,7 @@ function NewSubInner({ preselectTeam }: { preselectTeam: string }) {
     if (!f.team_id || !f.track_id || !f.title.trim() || !f.summary.trim()) { setMsg("Team, track, title and summary are required."); return; }
     setBusy(true);
     try {
-      const d = await api("/submissions", { method: "POST", body: JSON.stringify(f) });
+      const d = await api("/submissions", { method: "POST", body: JSON.stringify({ ...f, custom_data: custom }) });
       router.push(`/submissions/${d.project.id}/edit`);
     } catch (e: any) { setMsg(e.message); }
     finally { setBusy(false); }
@@ -94,6 +97,7 @@ function NewSubInner({ preselectTeam }: { preselectTeam: string }) {
         <label>Summary</label><input value={f.summary} onChange={(e) => setF({ ...f, summary: e.target.value })} placeholder="One line of what it does." maxLength={240} />
         <label>Description</label><textarea value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} placeholder="What did you build, and how does it work?" />
         <label>Repository URL</label><input value={f.repo_url} onChange={(e) => setF({ ...f, repo_url: e.target.value })} placeholder="https://…" inputMode="url" />
+        <CustomAnswers eventId={f.event_id} value={custom} onChange={setCustom} />
         {msg && <div className="form-error">{msg}</div>}
         <button className="btn" type="submit" disabled={busy}>{busy ? "Saving…" : <>Save draft <I.arrow /></>}</button>
       </form>

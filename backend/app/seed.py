@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from sqlalchemy import select
 from app.database import SessionLocal, engine
-from app.models import (Base, User, Role, Session as Sess, Event, EventStatus,
+from app.models import (Base, User, Role, Session as Sess, Event, EventStatus, EventOrganizer,
     Track, Team, TeamMember, TeamRole, Project, ProjectStatus, Judge, JudgeTrack, Score)
 from app.shared.security import hash_password, sha256_hex, utcnow
 
@@ -35,11 +35,15 @@ def parse_dt(v):
         return None
     return datetime.fromisoformat(str(v).replace("Z", "+00:00"))
 
-async def get_or_create_user(db, email, display_name, role: Role):
+async def get_or_create_user(db, email, display_name, role: Role, enforce_role: bool = False):
     norm = email.lower()
     res = await db.execute(select(User).where(User.email_norm == norm))
     u = res.scalar_one_or_none()
     if u:
+        # Demo accounts are re-asserted on every boot so a manual promotion (or
+        # a half-finished test run) can never leave the demo in a wrong state.
+        if enforce_role and u.role != role:
+            u.role = role
         return u, False
     u = User(email=email, email_norm=norm, password_hash=hash_password(DEV_PASSWORD),
              display_name=display_name, role=role)
@@ -54,12 +58,27 @@ async def ensure_session(db, user: User, raw: str):
     db.add(Sess(user_id=user.id, token_hash=sha256_hex(raw),
                 expires_at=utcnow() + timedelta(days=365), user_agent="seed"))
 
+async def ensure_event_organizer(db, event, user) -> None:
+    """The event creator is always an organizer of their own event."""
+    if not event.created_by:
+        event.created_by = user.id
+    res = await db.execute(select(EventOrganizer).where(
+        EventOrganizer.event_id == event.id, EventOrganizer.user_id == user.id))
+    if not res.scalar_one_or_none():
+        db.add(EventOrganizer(event_id=event.id, user_id=user.id, assigned_by=user.id))
+
 async def main():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     with open(FIXTURE, encoding="utf-8") as f:
         fx = json.load(f)
     async with SessionLocal() as db:
+        # Demo accounts first: the organizer is needed to own the seeded event.
+        org = adm = prt = None
+        if SEED_DEMO:
+            org, _ = await get_or_create_user(db, "organizer@local.test", "Organizer", Role.ORGANIZER, enforce_role=True)
+            adm, _ = await get_or_create_user(db, "admin@local.test", "Admin", Role.ADMIN, enforce_role=True)
+            prt, _ = await get_or_create_user(db, "participant@local.test", "Participant", Role.PARTICIPANT, enforce_role=True)
         # Event
         ev = fx.get("event", {})
         slug = ev.get("name", "Sample Hack 2026").lower().replace(" ", "-") + "-2026"
@@ -76,6 +95,15 @@ async def main():
             e.status = EventStatus.PUBLISHED
             e.submissions_close = parse_dt(ev.get("submissions_close"))
             e.slug = slug
+        # The seeded event predates event_organizers, so claim it for the demo
+        # organizer (and admin) instead of leaving it ownerless.
+        if org:
+            await ensure_event_organizer(db, e, org)
+        if adm:
+            res = await db.execute(select(EventOrganizer).where(
+                EventOrganizer.event_id == e.id, EventOrganizer.user_id == adm.id))
+            if not res.scalar_one_or_none():
+                db.add(EventOrganizer(event_id=e.id, user_id=adm.id, assigned_by=org.id if org else None))
         # Tracks
         for t in fx.get("tracks", []):
             tr = await db.get(Track, t["id"])
@@ -145,11 +173,8 @@ async def main():
             res = await db.execute(select(Score).where(Score.judge_id == s["judge"], Score.project_id == s["project"]))
             if not res.scalar_one_or_none():
                 db.add(Score(judge_id=s["judge"], project_id=s["project"], criteria=s.get("criteria", {}), comment=s.get("comment", "")))
-        # Demo accounts
+        # Demo account sessions
         if SEED_DEMO:
-            org, _ = await get_or_create_user(db, "organizer@local.test", "Organizer", Role.ORGANIZER)
-            adm, _ = await get_or_create_user(db, "admin@local.test", "Admin", Role.ADMIN)
-            prt, _ = await get_or_create_user(db, "participant@local.test", "Participant", Role.PARTICIPANT)
             for em, tok in TEST_TOKENS.items():
                 res = await db.execute(select(User).where(User.email_norm == em))
                 u = res.scalar_one_or_none()

@@ -1,18 +1,16 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { api, fetchMe, type Me } from "@/lib/api";
+import { api } from "@/lib/api";
 import { HeroScene, ProjectArt, I } from "@/components/art";
 
 export default function Home() {
   const [events, setEvents] = useState<any[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
   const [spotlightSlug, setSpotlightSlug] = useState("");
-  const [me, setMe] = useState<Me>(null);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    fetchMe().then(setMe);
     api("/public/events").then((d) => {
       setEvents(d.events || []);
       const slug = d.events?.[0]?.slug;
@@ -32,11 +30,8 @@ export default function Home() {
           <h1>Run hackathons on your<br />own infrastructure.</h1>
           <p>Dogfood is a self-hosted platform for managing hackathon events: publish events, form teams with secure invitations, collect submissions before a server-enforced deadline, and present every project in a public gallery. No cloud accounts or external services required.</p>
           <div className="hero-cta">
-            {me ? (
-              <><Link href="/dashboard" className="btn">Open my workspace <I.arrow /></Link><Link href="/events" className="btn-ghost">Browse events</Link></>
-            ) : (
-              <><Link href="/register" className="btn">Start building <I.arrow /></Link><Link href="/events" className="btn-ghost">Browse events</Link></>
-            )}
+            <Link href="/organizer?new=1" className="btn">Create New Event <I.arrow /></Link>
+            <Link href="/dashboard" className="btn-ghost">Manage My Events</Link>
           </div>
         </div>
         <div className="hero-glassbar">
@@ -52,9 +47,9 @@ export default function Home() {
       </svg>
 
       <div className="grid grid-3">
-        <div className="card"><h3><I.pin /> Discover</h3><p style={{ color: "var(--muted)" }}>One calm page per event — dates, tracks, prizes, and a countdown you can trust. Joining takes a single click.</p><Link href="/events">Browse events <I.arrow /></Link></div>
-        <div className="card"><h3><I.team /> Build</h3><p style={{ color: "var(--muted)" }}>Form a team, pass around a secure invite link, draft the project at your pace, and submit before the water closes over the clock.</p><Link href={me ? "/dashboard" : "/register"}>{me ? <>Open dashboard <I.arrow /></> : <>Create account <I.arrow /></>}</Link></div>
-        <div className="card"><h3><I.cal /> Run</h3><p style={{ color: "var(--muted)" }}>Organizers set dates, tracks and prizes, publish when ready, and watch submissions land — no manual required.</p><Link href="/organizer">Organizer console <I.arrow /></Link></div>
+        <div className="card"><h3><I.pin /> Launch</h3><p style={{ color: "var(--muted)" }}>Spin up a new event page in seconds. Set your dates, tracks, and prizes, then publish when you're ready.</p><Link href="/organizer?new=1">Create event <I.arrow /></Link></div>
+        <div className="card"><h3><I.team /> Review</h3><p style={{ color: "var(--muted)" }}>Track team formations and monitor project drafts. Ensure all submissions land smoothly before the clock runs out.</p><Link href="/organizer">Review submissions <I.arrow /></Link></div>
+        <div className="card"><h3><I.cal /> Run</h3><p style={{ color: "var(--muted)" }}>Configure deadlines, manage participants, and watch the live dashboard as your event unfolds.</p><Link href="/organizer">Organizer console <I.arrow /></Link></div>
       </div>
 
       <div className="page-head" style={{ display: "flex", alignItems: "baseline", gap: 14 }}>

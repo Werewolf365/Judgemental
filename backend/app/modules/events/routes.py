@@ -1,16 +1,28 @@
 import re
 from datetime import datetime
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.models import Event, EventStatus, Track, Prize, EventParticipant, User, ParticipantRegistration, GalleryVisibility
-from app.modules.auth.dependencies import current_user, require_roles
-from app.modules.events.schemas import EventIn, TrackIn, PrizeIn, RegistrationForm
+from app.models import Event, EventStatus, Track, Prize, EventParticipant, EventOrganizer, User, ParticipantRegistration, GalleryVisibility, EventFormField
+from app.modules.auth.dependencies import current_user, optional_user, require_roles
+from app.modules.events.access import (managed_event, manageable_event_ids, owned_only,
+                                       require_manageable, visible_event_or_404, role_of)
+from app.modules.events.schemas import EventIn, TrackIn, PrizeIn, RegistrationForm, FormFieldIn, OrganizerAssignIn
 from app.shared.errors import err
+from app.shared.audit import record
 from app.shared.clock import utcnow
 
 router = APIRouter(tags=["events"])
+
+# Roles that run a hackathon rather than compete in one. Staff and the judging
+# panel are never competitors, so they are refused registration outright: an
+# organizer's own event must not put them in its participant roster, and a
+# judge must not end up eligible to submit into the event they are judging.
+# The check is on the account's role, not on which event is being joined, so
+# there is no event that lets a staff account slip through.
+NON_PARTICIPANT_ROLES = ("ORGANIZER", "ADMIN", "JUDGE")
 
 def slugify(name: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
@@ -44,16 +56,16 @@ def event_out(e: Event) -> dict:
 
 @router.get("/events")
 async def list_all_events(db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
-    res = await db.execute(select(Event).order_by(Event.created_at.desc()))
+    # Scoped: an organizer only ever sees the events they run.
+    ids = await manageable_event_ids(db, user)
+    res = await db.execute(owned_only(select(Event).order_by(Event.created_at.desc()), ids))
     return {"events": [event_out(e) for e in res.scalars().all()]}
 
 @router.get("/events/{event_id}/stats")
 async def event_stats(event_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
     from sqlalchemy import func
     from app.models import Team, Project, ProjectStatus, EventParticipant
-    e = await db.get(Event, event_id)
-    if not e:
-        err(404, "not_found", "Event not found")
+    e = await managed_event(db, user, event_id)
     tracks = (await db.execute(select(func.count()).select_from(Track).where(Track.event_id == e.id))).scalar() or 0
     prizes = (await db.execute(select(func.count()).select_from(Prize).where(Prize.event_id == e.id))).scalar() or 0
     participants = (await db.execute(select(func.count()).select_from(EventParticipant).where(EventParticipant.event_id == e.id))).scalar() or 0
@@ -65,7 +77,7 @@ async def event_stats(event_id: str, db: AsyncSession = Depends(get_db), user: U
             "projects": projects, "drafts": projects - submitted, "submitted": submitted}}
 
 @router.post("/events")
-async def create_event(body: EventIn, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
+async def create_event(body: EventIn, request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
     if not (body.name or "").strip():
         err(422, "validation_error", "Event name is required")
     d = {"registration_start": parse_dt(body.registration_start), "registration_close": parse_dt(body.registration_close),
@@ -80,8 +92,12 @@ async def create_event(body: EventIn, db: AsyncSession = Depends(get_db), user: 
     e = Event(id=f"evt_{uuid.uuid4().hex[:8]}", slug=slug, name=body.name, description=body.description,
               status=EventStatus.DRAFT, created_by=user.id, **d)
     db.add(e)
+    # The creator is the first organizer of their own event.
+    db.add(EventOrganizer(event_id=e.id, user_id=user.id, assigned_by=user.id))
     await db.commit()
     await db.refresh(e)
+    await record(user, "event.created", target_type="event", target_id=e.id, event_id=e.id,
+                 detail={"name": e.name, "slug": e.slug}, request=request)
     return {"event": event_out(e)}
 
 @router.get("/events/{event_id}")
@@ -91,15 +107,13 @@ async def get_event(event_id: str, db: AsyncSession = Depends(get_db), user: Use
         # try slug
         res = await db.execute(select(Event).where(Event.slug == event_id))
         e = res.scalar_one_or_none()
-    if not e:
-        err(404, "not_found", "Event not found")
+    # Published events are readable by anyone; drafts only by their organizers.
+    await visible_event_or_404(db, user, e)
     return {"event": event_out(e)}
 
 @router.patch("/events/{event_id}")
-async def patch_event(event_id: str, body: EventIn, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
-    e = await db.get(Event, event_id)
-    if not e:
-        err(404, "not_found", "Event not found")
+async def patch_event(event_id: str, body: EventIn, request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
+    e = await managed_event(db, user, event_id)
     vals = body.model_dump(exclude_unset=True)
     for k in ("registration_start", "registration_close", "event_start", "event_end", "submissions_open", "submissions_close"):
         if k in vals:
@@ -127,30 +141,38 @@ async def patch_event(event_id: str, body: EventIn, db: AsyncSession = Depends(g
         setattr(e, k, v)
     await db.commit()
     await db.refresh(e)
+    await record(user, "event.updated", target_type="event", target_id=e.id, event_id=e.id,
+                 detail={"fields": sorted(vals.keys())}, request=request)
     return {"event": event_out(e)}
 
 @router.post("/events/{event_id}/publish")
-async def publish(event_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
-    e = await db.get(Event, event_id)
-    if not e:
-        err(404, "not_found", "Event not found")
+async def publish(event_id: str, request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
+    e = await managed_event(db, user, event_id)
     if not e.name or not e.submissions_close:
         err(422, "validation_error", "Event needs name and submissions_close to publish")
     e.status = EventStatus.PUBLISHED
     await db.commit()
+    await record(user, "event.published", target_type="event", target_id=e.id, event_id=e.id,
+                 detail={"name": e.name}, request=request)
     return {"event": event_out(e)}
 
 @router.post("/events/{event_id}/unpublish")
-async def unpublish(event_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
-    e = await db.get(Event, event_id)
-    if not e:
-        err(404, "not_found", "Event not found")
+async def unpublish(event_id: str, request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
+    e = await managed_event(db, user, event_id)
     e.status = EventStatus.DRAFT
     await db.commit()
+    await record(user, "event.unpublished", target_type="event", target_id=e.id, event_id=e.id,
+                 detail={"name": e.name}, request=request)
     return {"event": event_out(e)}
 
 @router.post("/events/{event_id}/join")
 async def join_event(event_id: str, body: RegistrationForm, db: AsyncSession = Depends(get_db), user: User = Depends(current_user)):
+    # Staff and judges run events, they do not compete in them. Refused before
+    # the event is even loaded so the answer does not depend on the event.
+    role = role_of(user)
+    if role in NON_PARTICIPANT_ROLES:
+        err(403, "forbidden",
+            f"{role.title()} accounts do not register for events. Run one from the organizer console instead.")
     e = await db.get(Event, event_id)
     if not e:
         err(404, "not_found", "Event not found")
@@ -246,9 +268,7 @@ async def leave_event(event_id: str, db: AsyncSession = Depends(get_db), user: U
 @router.get("/events/{event_id}/participants")
 async def list_participants(event_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
     from app.models import Team, TeamMember
-    e = await db.get(Event, event_id)
-    if not e:
-        err(404, "not_found", "Event not found")
+    e = await managed_event(db, user, event_id)
     res = await db.execute(select(EventParticipant, User).join(User, User.id == EventParticipant.user_id).where(EventParticipant.event_id == e.id).order_by(User.display_name))
     out = []
     for part, u in res.all():
@@ -262,9 +282,7 @@ async def list_participants(event_id: str, db: AsyncSession = Depends(get_db), u
 @router.get("/events/{event_id}/submissions")
 async def list_event_submissions(event_id: str, status: str = "", db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
     from app.models import Team, Track, Project, ProjectStatus
-    e = await db.get(Event, event_id)
-    if not e:
-        err(404, "not_found", "Event not found")
+    e = await managed_event(db, user, event_id)
     stmt = select(Project, Team, Track).join(Team, Team.id == Project.team_id).join(Track, Track.id == Project.track_id).where(Project.event_id == e.id)
     if status:
         try:
@@ -276,24 +294,26 @@ async def list_event_submissions(event_id: str, status: str = "", db: AsyncSessi
     for p, tm, tr in (await db.execute(stmt)).all():
         out.append({"id": p.id, "title": p.title, "summary": p.summary, "team": tm.name, "team_id": tm.id,
                     "track": tr.name, "track_id": tr.id, "status": p.status.value if hasattr(p.status, "value") else str(p.status),
-                    "is_visible": p.is_visible, "repo_url": p.repo_url,
+                    "is_visible": p.is_visible, "repo_url": p.repo_url, "custom_data": p.custom_data or {},
                     "submitted_at": p.submitted_at.isoformat() if p.submitted_at else None,
                     "updated_at": p.updated_at.isoformat() if p.updated_at else None})
     return {"submissions": out, "total": len(out)}
 
 # Tracks
 @router.get("/events/{event_id}/tracks")
-async def list_tracks(event_id: str, db: AsyncSession = Depends(get_db)):
+async def list_tracks(event_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(optional_user)):
+    # Public once the event is published; drafts stay organizer-only.
+    await visible_event_or_404(db, user, await db.get(Event, event_id))
     res = await db.execute(select(Track).where(Track.event_id == event_id).order_by(Track.name))
     return {"tracks": [{"id": t.id, "event_id": t.event_id, "name": t.name, "is_active": t.is_active} for t in res.scalars().all()]}
 
 @router.post("/events/{event_id}/tracks")
-async def create_track(event_id: str, body: TrackIn, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
-    e = await db.get(Event, event_id)
-    if not e:
-        err(404, "not_found", "Event not found")
+async def create_track(event_id: str, body: TrackIn, request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
+    e = await managed_event(db, user, event_id)
+    if not (body.name or "").strip():
+        err(422, "validation_error", "Track name is required")
     import uuid
-    t = Track(id=f"trk_{uuid.uuid4().hex[:8]}", event_id=event_id, name=body.name, is_active=True)
+    t = Track(id=f"trk_{uuid.uuid4().hex[:8]}", event_id=e.id, name=body.name, is_active=True)
     db.add(t)
     try:
         await db.commit()
@@ -301,68 +321,230 @@ async def create_track(event_id: str, body: TrackIn, db: AsyncSession = Depends(
         await db.rollback()
         err(409, "already_joined", "Track name already exists for this event")
     await db.refresh(t)
+    await record(user, "event.track_created", target_type="track", target_id=t.id, event_id=e.id,
+                 detail={"name": t.name}, request=request)
     return {"track": {"id": t.id, "event_id": t.event_id, "name": t.name, "is_active": t.is_active}}
 
 @router.patch("/tracks/{track_id}")
-async def patch_track(track_id: str, body: dict, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
+async def patch_track(track_id: str, body: dict, request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
     t = await db.get(Track, track_id)
     if not t:
         err(404, "not_found", "Track not found")
+    # The track id alone must not be enough: check the parent event too.
+    await require_manageable(db, user, t.event_id)
     if "name" in body:
         t.name = body["name"]
     if "is_active" in body:
         t.is_active = bool(body["is_active"])
     await db.commit()
+    await record(user, "event.track_updated", target_type="track", target_id=t.id, event_id=t.event_id,
+                 detail={"fields": sorted(body.keys())}, request=request)
     return {"track": {"id": t.id, "name": t.name, "is_active": t.is_active}}
 
 @router.delete("/tracks/{track_id}")
-async def delete_track(track_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
+async def delete_track(track_id: str, request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
     from app.models import Project
     from sqlalchemy import select as sel
     t = await db.get(Track, track_id)
     if not t:
         err(404, "not_found", "Track not found")
+    await require_manageable(db, user, t.event_id)
     used = await db.execute(sel(Project).where(Project.track_id == track_id).limit(1))
     if used.scalar_one_or_none():
         t.is_active = False
         await db.commit()
+        await record(user, "event.track_deactivated", target_type="track", target_id=t.id,
+                     event_id=t.event_id, detail={"name": t.name, "reason": "in use by projects"}, request=request)
         return {"ok": True, "deactivated": True}
     await db.delete(t)
     await db.commit()
+    await record(user, "event.track_deleted", target_type="track", target_id=t.id,
+                 event_id=t.event_id, detail={"name": t.name}, request=request)
     return {"ok": True}
 
 # Prizes
 @router.get("/events/{event_id}/prizes")
-async def list_prizes(event_id: str, db: AsyncSession = Depends(get_db)):
+async def list_prizes(event_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(optional_user)):
+    await visible_event_or_404(db, user, await db.get(Event, event_id))
     res = await db.execute(select(Prize).where(Prize.event_id == event_id).order_by(Prize.display_order))
     return {"prizes": [{"id": p.id, "event_id": p.event_id, "track_id": p.track_id, "name": p.name, "description": p.description, "value_desc": p.value_desc, "display_order": p.display_order} for p in res.scalars().all()]}
 
 @router.post("/events/{event_id}/prizes")
-async def create_prize(event_id: str, body: PrizeIn, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
+async def create_prize(event_id: str, body: PrizeIn, request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
+    e = await managed_event(db, user, event_id)
+    if not (body.name or "").strip():
+        err(422, "validation_error", "Prize name is required")
+    if body.track_id:
+        tr = await db.get(Track, body.track_id)
+        # A prize may only hang off a track of its own event.
+        if not tr or tr.event_id != e.id:
+            err(422, "validation_error", "Invalid track for this event")
     import uuid
-    p = Prize(id=f"prz_{uuid.uuid4().hex[:8]}", event_id=event_id, track_id=body.track_id, name=body.name,
+    p = Prize(id=f"prz_{uuid.uuid4().hex[:8]}", event_id=e.id, track_id=body.track_id, name=body.name,
               description=body.description, value_desc=body.value_desc, display_order=body.display_order)
     db.add(p)
     await db.commit()
     await db.refresh(p)
+    await record(user, "event.prize_created", target_type="prize", target_id=p.id, event_id=e.id,
+                 detail={"name": p.name}, request=request)
     return {"prize": {"id": p.id, "name": p.name}}
 
 @router.patch("/prizes/{prize_id}")
-async def patch_prize(prize_id: str, body: dict, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
+async def patch_prize(prize_id: str, body: dict, request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
     p = await db.get(Prize, prize_id)
     if not p:
         err(404, "not_found", "Prize not found")
+    await require_manageable(db, user, p.event_id)
     for k in ("name", "description", "value_desc", "track_id", "display_order"):
         if k in body:
             setattr(p, k, body[k])
     await db.commit()
+    await record(user, "event.prize_updated", target_type="prize", target_id=p.id, event_id=p.event_id,
+                 detail={"fields": sorted(body.keys())}, request=request)
     return {"ok": True}
 
 @router.delete("/prizes/{prize_id}")
-async def delete_prize(prize_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
+async def delete_prize(prize_id: str, request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
     p = await db.get(Prize, prize_id)
     if not p:
         err(404, "not_found", "Prize not found")
+    await require_manageable(db, user, p.event_id)
+    name = p.name
     await db.delete(p)
     await db.commit()
+    await record(user, "event.prize_deleted", target_type="prize", target_id=prize_id,
+                 event_id=p.event_id, detail={"name": name}, request=request)
     return {"ok": True}
+
+# ---- Organizer-defined submission form fields ----
+# Participants read these (public, like tracks) to render the project form.
+# Only organizers manage them. Stored answers live on projects.custom_data.
+
+def field_out(f: EventFormField) -> dict:
+    return {"id": f.id, "event_id": f.event_id, "label": f.label,
+            "field_type": f.field_type, "required": f.required,
+            "options": f.options or []}
+
+@router.get("/events/{event_id}/form-fields")
+async def list_form_fields(event_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(optional_user)):
+    # Participants need these to render the submit form, but only for a
+    # published event; an unpublished form is organizer-only.
+    await visible_event_or_404(db, user, await db.get(Event, event_id))
+    res = await db.execute(select(EventFormField).where(EventFormField.event_id == event_id).order_by(EventFormField.created_at))
+    return {"fields": [field_out(f) for f in res.scalars().all()]}
+
+@router.post("/events/{event_id}/form-fields")
+async def create_form_field(event_id: str, body: FormFieldIn, request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
+    e = await managed_event(db, user, event_id)
+    import uuid as _u
+    f = EventFormField(id=f"fld_{_u.uuid4().hex[:8]}", event_id=e.id, label=body.label.strip(),
+                       field_type=body.field_type, required=body.required, options=body.options)
+    if not f.label:
+        err(422, "validation_error", "Field label is required")
+    db.add(f)
+    await db.commit()
+    await db.refresh(f)
+    await record(user, "event.form_field_created", target_type="form_field", target_id=f.id, event_id=e.id,
+                 detail={"label": f.label, "field_type": f.field_type}, request=request)
+    return {"field": field_out(f)}
+
+@router.patch("/form-fields/{field_id}")
+async def patch_form_field(field_id: str, body: FormFieldIn, request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
+    f = await db.get(EventFormField, field_id)
+    if not f:
+        err(404, "not_found", "Field not found")
+    await require_manageable(db, user, f.event_id)
+    # Full-object edit: label/type/required/options all organizer-editable.
+    if not body.label.strip():
+        err(422, "validation_error", "Field label is required")
+    f.label = body.label.strip()
+    f.field_type = body.field_type
+    f.required = body.required
+    f.options = body.options
+    await db.commit()
+    await db.refresh(f)
+    await record(user, "event.form_field_updated", target_type="form_field", target_id=f.id,
+                 event_id=f.event_id, detail={"label": f.label, "required": f.required}, request=request)
+    return {"field": field_out(f)}
+
+@router.delete("/form-fields/{field_id}")
+async def delete_form_field(field_id: str, request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
+    f = await db.get(EventFormField, field_id)
+    if not f:
+        err(404, "not_found", "Field not found")
+    await require_manageable(db, user, f.event_id)
+    label = f.label
+    # Already-stored answers stay on projects; they render only for live fields.
+    await db.delete(f)
+    await db.commit()
+    await record(user, "event.form_field_deleted", target_type="form_field", target_id=field_id,
+                 event_id=f.event_id, detail={"label": label}, request=request)
+    return {"ok": True}
+
+# ---- Organizer roster ----
+# Membership decides who can manage this event. Assignment never grants a
+# role: the account must already be an ORGANIZER or ADMIN, so this endpoint
+# cannot be used to promote a participant into one.
+
+def organizer_out(u: User, e: Event, assigned_by: str | None = None, assigned_at=None) -> dict:
+    return {"user_id": u.id, "email": u.email, "display_name": u.display_name,
+            "role": u.role.value if hasattr(u.role, "value") else str(u.role),
+            "is_owner": e.created_by == u.id,
+            "assigned_by": assigned_by,
+            "assigned_at": assigned_at.isoformat() if assigned_at else None}
+
+@router.get("/events/{event_id}/organizers")
+async def list_organizers(event_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
+    e = await managed_event(db, user, event_id)
+    res = await db.execute(
+        select(User, EventOrganizer.assigned_by, EventOrganizer.created_at)
+        .join(EventOrganizer, EventOrganizer.user_id == User.id)
+        .where(EventOrganizer.event_id == e.id).order_by(User.display_name))
+    rows = {u.id: organizer_out(u, e, by, at) for u, by, at in res.all()}
+    # The creator stays listed even if their row predates this table.
+    if e.created_by and e.created_by not in rows:
+        owner = await db.get(User, e.created_by)
+        if owner:
+            rows[e.created_by] = organizer_out(owner, e)
+    return {"organizers": list(rows.values())}
+
+@router.post("/events/{event_id}/organizers")
+async def add_organizer(event_id: str, body: OrganizerAssignIn, request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
+    e = await managed_event(db, user, event_id)
+    if not body.email and not body.user_id:
+        err(422, "validation_error", "Provide the organizer's email")
+    stmt = select(User).where(User.email_norm == body.email) if body.email else select(User).where(User.id == body.user_id)
+    target = (await db.execute(stmt)).scalar_one_or_none()
+    if not target:
+        # Same answer whether the account is missing or invisible to us: no
+        # directory enumeration through this endpoint.
+        err(404, "not_found", "No account with that email. Ask them to sign up first, then an admin can grant the organizer role.")
+    role = target.role.value if hasattr(target.role, "value") else str(target.role)
+    if role not in ("ORGANIZER", "ADMIN"):
+        err(422, "validation_error", f"{target.email} is a {role.lower()}, not an organizer. Grant the organizer role first.")
+    ins = pg_insert(EventOrganizer).values(event_id=e.id, user_id=target.id, assigned_by=user.id)
+    ins = ins.on_conflict_do_nothing(index_elements=["event_id", "user_id"])
+    await db.execute(ins)
+    await db.commit()
+    res = await db.execute(select(EventOrganizer).where(EventOrganizer.event_id == e.id, EventOrganizer.user_id == target.id))
+    row = res.scalar_one_or_none()
+    await record(user, "event.organizer_added", target_type="user", target_id=target.id, event_id=e.id,
+                 detail={"email": target.email, "role": role, "event": e.name}, request=request)
+    return {"organizer": organizer_out(target, e, row.assigned_by if row else None, row.created_at if row else None), "added": True}
+
+@router.delete("/events/{event_id}/organizers/{user_id}")
+async def remove_organizer(event_id: str, user_id: str, request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
+    e = await managed_event(db, user, event_id)
+    if e.created_by == user_id:
+        err(409, "invalid_state_transition", "The event creator cannot be removed")
+    res = await db.execute(select(EventOrganizer).where(EventOrganizer.event_id == e.id, EventOrganizer.user_id == user_id))
+    row = res.scalar_one_or_none()
+    if not row:
+        # Idempotent: already gone.
+        return {"ok": True, "removed": False}
+    gone = await db.get(User, user_id)
+    await db.delete(row)
+    await db.commit()
+    await record(user, "event.organizer_removed", target_type="user", target_id=user_id, event_id=e.id,
+                 detail={"email": getattr(gone, "email", None), "event": e.name}, request=request)
+    return {"ok": True, "removed": True}

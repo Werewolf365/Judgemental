@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, fetchMe, fmtDate, type Me } from "@/lib/api";
 import { I } from "@/components/art";
+import Popup from "@/components/Popup";
 
 type OrgEvent = { event: any; stats: any };
 
@@ -11,6 +12,7 @@ function OrganizerHome({ me }: { me: Me }) {
   const [items, setItems] = useState<OrgEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
+  const [notice, setNotice] = useState<{ title: string; body: React.ReactNode } | null>(null);
   useEffect(() => {
     (async () => {
       try {
@@ -30,7 +32,7 @@ function OrganizerHome({ me }: { me: Me }) {
     setMsg("");
     try {
       const pub = ev.status !== "PUBLISHED";
-      await api(`/events/${ev.id}/${pub ? "publish" : "unpublish"}`, { method: "POST", body: "{}" });
+      const d = await api(`/events/${ev.id}/${pub ? "publish" : "unpublish"}`, { method: "POST", body: "{}" });
       const rows: OrgEvent[] = [];
       const list = await api("/events");
       for (const e of list.events || []) {
@@ -38,12 +40,23 @@ function OrganizerHome({ me }: { me: Me }) {
         catch { rows.push({ event: e, stats: null }); }
       }
       setItems(rows);
+      // Publishing is the outcome the whole wizard is driving at, so it gets
+      // a popup rather than a line of text in a scrolled-past panel.
+      setNotice(pub
+        ? { title: "Event published", body: <>“{d.event.name}” is live. It now shows in the <b>Events</b> list and anyone can open it to register.</> }
+        : { title: "Moved back to draft", body: <>“{d.event.name}” is hidden from the Events list and the gallery again.</> });
     } catch (e: any) { setMsg(e.message); }
   }
 
   if (loading) return <div className="card"><div className="skel" style={{ height: 200 }} /></div>;
   return (
     <div>
+      {notice && (
+        <Popup kind={notice.title.startsWith("Moved") ? "info" : "ok"} title={notice.title}
+          dismissLabel="Got it" onClose={() => setNotice(null)}>
+          {notice.body}
+        </Popup>
+      )}
       <div className="page-head"><span className="eyebrow"><span className="dot" /> Mission control</span>
         <h1>Event overview</h1>
         <p className="lead">Every event you run — status, dates, tracks, prizes, and submission activity at a glance.</p></div>

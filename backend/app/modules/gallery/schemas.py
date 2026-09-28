@@ -57,6 +57,10 @@ class ProjectsListResponse(BaseModel):
     page_size: int
     total: int
 
+class CustomFieldOut(BaseModel):
+    label: str
+    value: str
+
 class ProjectDetailOut(BaseModel):
     id: str
     title: str
@@ -67,6 +71,7 @@ class ProjectDetailOut(BaseModel):
     track: Optional[str]
     repo_url: Optional[str]
     demo_url: Optional[str]
+    custom_fields: List[CustomFieldOut] = []
     submitted_at: Optional[str]
 
 class ProjectDetailResponse(BaseModel):

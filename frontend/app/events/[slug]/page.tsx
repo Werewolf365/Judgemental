@@ -201,6 +201,10 @@ export default function EventPage({ params }: { params: { slug: string } }) {
   const [joined, setJoined] = useState(false);
   const [showRegForm, setShowRegForm] = useState(false);
   const [isDraftPreview, setIsDraftPreview] = useState(false);
+  // Organizers, admins and judges run events; they never compete in one, so
+  // the server refuses their registration. Mirror that here rather than
+  // offering a form that is guaranteed to bounce.
+  const [isStaff, setIsStaff] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -208,7 +212,8 @@ export default function EventPage({ params }: { params: { slug: string } }) {
       const m = await fetchMe();
       if (cancelled) return;
       setMe(m);
-      const isStaff = !!m && (m.role === "ORGANIZER" || m.role === "ADMIN");
+      const isStaff = !!m && (m.role === "ORGANIZER" || m.role === "ADMIN" || m.role === "JUDGE");
+      setIsStaff(isStaff);
       try {
         const d = await api(`/public/events/${params.slug}`);
         if (cancelled) return;
@@ -236,6 +241,7 @@ export default function EventPage({ params }: { params: { slug: string } }) {
   /* Step 1: clicking "Join" opens the form (if not logged in, redirect to login first) */
   function handleJoinClick() {
     if (!me) { window.location.href = "/login"; return; }
+    if (isStaff) { setMsg("Your role runs events rather than competing in them, so there is nothing to register for."); return; }
     setShowRegForm(true);
   }
 
@@ -268,7 +274,7 @@ export default function EventPage({ params }: { params: { slug: string } }) {
   const ev = data.event;
   return (
     <div>
-      {showRegForm && (
+      {showRegForm && !isStaff && (
         <RegistrationOverlay me={me} tracks={data?.tracks || []} onComplete={completeRegistration} onCancel={() => setShowRegForm(false)} />
       )}
       <div className="hero" style={{ paddingBottom: 0 }}>
@@ -278,8 +284,14 @@ export default function EventPage({ params }: { params: { slug: string } }) {
           <h1 style={{ marginTop: 10 }}>{ev.name}</h1>
           <p>{ev.description || "A Dogfood hackathon event."}</p>
           <div className="hero-cta">
-            <button className="btn" onClick={handleJoinClick} disabled={busy || joined}>{busy ? "Joining…" : joined ? "You're registered" : me ? "Join this event" : "Log in to join"} <I.arrow /></button>
-          {joined && <button className="btn-ghost" onClick={leave} disabled={busy}>Leave event</button>}
+            {isStaff ? (
+              <span className="badge badge-track" title="Organizers, admins and judges run events instead of competing in them.">
+                <I.team /> {me?.role} — you run events, not compete in them
+              </span>
+            ) : (
+              <button className="btn" onClick={handleJoinClick} disabled={busy || joined}>{busy ? "Joining…" : joined ? "You're registered" : me ? "Join this event" : "Log in to join"} <I.arrow /></button>
+            )}
+            {joined && <button className="btn-ghost" onClick={leave} disabled={busy}>Leave event</button>}
             <Link href={`/events/${ev.slug}/projects`} className="btn-ghost">View submissions</Link>
             {ev.gallery_visibility && ev.gallery_visibility !== "PUBLIC" && (
               <span className="badge badge-muted" title="Set by the organizer">Gallery: {ev.gallery_visibility === "PARTICIPANTS" ? "Participants" : "Organizers only"}</span>

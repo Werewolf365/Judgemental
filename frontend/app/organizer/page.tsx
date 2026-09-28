@@ -4,15 +4,25 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { api, fetchMe, fmtDate } from "@/lib/api";
 import { I } from "@/components/art";
 import DateTimePicker from "@/components/DateTimePicker";
+import Popup from "@/components/Popup";
 
 const STEPS = [
   { n: 1, key: "details", label: "Details" },
   { n: 2, key: "tracks", label: "Tracks" },
   { n: 3, key: "prizes", label: "Prizes" },
-  { n: 4, key: "gallery", label: "Gallery access" },
-  { n: 5, key: "publish", label: "Review & publish" },
+  { n: 4, key: "form", label: "Submission form" },
+  { n: 5, key: "gallery", label: "Gallery access" },
+  { n: 6, key: "publish", label: "Review & publish" },
 ] as const;
 type StepKey = typeof STEPS[number]["key"];
+
+const FIELD_TYPES = [
+  { v: "text", label: "Short text" },
+  { v: "textarea", label: "Long text" },
+  { v: "number", label: "Number" },
+  { v: "url", label: "Link" },
+  { v: "select", label: "Dropdown" },
+];
 
 const VIS_OPTIONS = [
   { v: "PUBLIC", title: "Public", desc: "Anyone on the internet can browse the gallery." },
@@ -39,10 +49,22 @@ function Console() {
   const [subs, setSubs] = useState<any[]>([]);
   const [subFilter, setSubFilter] = useState("");
   const [people, setPeople] = useState<any[]>([]);
-  const [reviewTab, setReviewTab] = useState<"submissions" | "people">("submissions");
+  const [reviewTab, setReviewTab] = useState<"submissions" | "people" | "team">("submissions");
+  const [orgs, setOrgs] = useState<any[]>([]);
+  const [orgEmail, setOrgEmail] = useState("");
+  const [formFields, setFormFields] = useState<any[]>([]);
+  const [newField, setNewField] = useState({ label: "", field_type: "text", required: false, optionsText: "" });
+  const [editingId, setEditingId] = useState("");
+  const [editField, setEditField] = useState({ label: "", field_type: "text", required: false, optionsText: "" });
+  // One-shot confirmation after a publish, so the moment of going live is
+  // unmistakable rather than a line of text that scrolls past.
+  const [notice, setNotice] = useState<{ title: string; body: React.ReactNode } | null>(null);
   const router = useRouter();
   const search = useSearchParams();
   const wanted = search.get("event");
+  // /organizer?new=1 is the landing-page "Create New Event" target: open Step 1
+  // on the create form instead of pre-selecting the most recent event.
+  const startNew = search.get("new") === "1";
 
   async function loadDetail(id: string) {
     try { setDetail(await api(`/public/events/${id}`)); }
@@ -54,8 +76,12 @@ function Console() {
           api(`/events/${d.event.id}/prizes`).catch(() => ({ prizes: [] })),
         ]);
         setDetail({ event: d.event, tracks: t.tracks || [], prizes: p.prizes || [] });
-      } catch { setDetail(null); }
+      } catch { setDetail(null); setFormFields([]); return; }
     }
+    try {
+      const ff = await api(`/events/${id}/form-fields`);
+      setFormFields(ff.fields || []);
+    } catch { setFormFields([]); }
   }
 
   async function loadEvents(selectId?: string) {
@@ -65,7 +91,7 @@ function Console() {
     setEvents(list);
     const want = selectId || wanted;
     if (want && list.some((e: any) => e.id === want || e.slug === want)) setSel(want);
-    else if (!selectId && list[0]) setSel((s) => s || list[0].id);
+    else if (!selectId && !startNew && list[0]) setSel((s) => s || list[0].id);
   }
 
   useEffect(() => {
@@ -89,8 +115,29 @@ function Console() {
   async function loadReview(id: string) {
     try { setSubs((await api(`/events/${id}/submissions?status=${subFilter}`)).submissions || []); } catch { setSubs([]); }
     try { setPeople((await api(`/events/${id}/participants`)).participants || []); } catch { setPeople([]); }
+    try { setOrgs((await api(`/events/${id}/organizers`)).organizers || []); } catch { setOrgs([]); }
   }
   useEffect(() => { if (sel) loadReview(sel); }, [sel, subFilter]);
+
+  async function addOrganizer(e: React.FormEvent) {
+    e.preventDefault(); setMsg("");
+    const email = orgEmail.trim();
+    if (!email) { setMsg("Enter the organizer's email."); return; }
+    try {
+      const d = await api(`/events/${sel}/organizers`, { method: "POST", body: JSON.stringify({ email }) });
+      setOrgEmail("");
+      setMsg(`${d.organizer.display_name} can now manage this event.`);
+      await loadReview(sel);
+    } catch (e: any) { setMsg(e.message); }
+  }
+  async function removeOrganizer(userId: string) {
+    setMsg("");
+    try {
+      await api(`/events/${sel}/organizers/${userId}`, { method: "DELETE" });
+      setMsg("Organizer removed from this event.");
+      await loadReview(sel);
+    } catch (e: any) { setMsg(e.message); }
+  }
 
   async function create() {
     setMsg("");
@@ -98,7 +145,7 @@ function Console() {
     try {
       const d = await api("/events", { method: "POST", body: JSON.stringify({ name: name.trim(), submissions_close: close || new Date(Date.now() + 30 * 864e5).toISOString() }) });
       setName(""); setClose("");
-      setMsg(`Draft “${d.event.name}” created — Step 1 of 5 done. Add tracks next.`);
+      setMsg(`Draft “${d.event.name}” created — Step 1 of 6 done. Add tracks next.`);
       await loadEvents(d.event.id);
       setStep("tracks");
     } catch (e: any) { setMsg(e.message); }
@@ -125,6 +172,48 @@ function Console() {
     try { await api(`/events/${detail.event.id}/prizes`, { method: "POST", body: JSON.stringify(prize) }); setPrize({ name: "", description: "", value_desc: "" }); await loadDetail(detail.event.id); }
     catch (e: any) { setMsg(e.message); }
   }
+  function parseOptions(text: string) {
+    return text.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
+  }
+  async function addField() {
+    if (!newField.label.trim() || !detail) return;
+    try {
+      await api(`/events/${detail.event.id}/form-fields`, { method: "POST", body: JSON.stringify({
+        label: newField.label.trim(), field_type: newField.field_type,
+        required: newField.required, options: parseOptions(newField.optionsText),
+      }) });
+      setNewField({ label: "", field_type: "text", required: false, optionsText: "" });
+      await loadDetail(detail.event.id);
+    } catch (e: any) { setMsg(e.message); }
+  }
+  function startEdit(f: any) {
+    setEditingId(f.id);
+    setEditField({ label: f.label, field_type: f.field_type, required: !!f.required, optionsText: (f.options || []).join(", ") });
+  }
+  async function saveEdit(id: string) {
+    if (!editField.label.trim()) { setMsg("Field label is required."); return; }
+    try {
+      await api(`/form-fields/${id}`, { method: "PATCH", body: JSON.stringify({
+        label: editField.label.trim(), field_type: editField.field_type,
+        required: editField.required, options: parseOptions(editField.optionsText),
+      }) });
+      setEditingId("");
+      await loadDetail(detail.event.id);
+    } catch (e: any) { setMsg(e.message); }
+  }
+  async function deleteField(id: string) {
+    if (!confirm("Remove this field from the submission form? Already-saved answers stay on existing projects.")) return;
+    try { await api(`/form-fields/${id}`, { method: "DELETE" }); await loadDetail(detail.event.id); }
+    catch (e: any) { setMsg(e.message); }
+  }
+  async function toggleFieldRequired(f: any) {
+    try {
+      await api(`/form-fields/${f.id}`, { method: "PATCH", body: JSON.stringify({
+        label: f.label, field_type: f.field_type, required: !f.required, options: f.options || [],
+      }) });
+      await loadDetail(detail.event.id);
+    } catch (e: any) { setMsg(e.message); }
+  }
   async function setGalleryVis(v: string) {
     if (!detail) return;
     try {
@@ -145,6 +234,15 @@ function Console() {
     try {
       const d = await api(`/events/${id}/${un ? "unpublish" : "publish"}`, { method: "POST", body: "{}" });
       setMsg(un ? "Moved back to draft — hidden from Events and the Gallery." : `“${d.event.name}” is live in Events and the Gallery.`);
+      if (un) {
+        setNotice({ title: "Moved back to draft", body: `“${d.event.name}” is hidden from Events and the gallery again.` });
+      } else {
+        setNotice({
+          title: "Event published",
+          body: <>“{d.event.name}” is now live. It appears in the <b>Events</b> list, and anyone who has the
+            link can open <code>/events/{d.event.slug}</code> and join.</>,
+        });
+      }
       await loadEvents(d.event.id);
       await loadDetail(d.event.id);
     } catch (e: any) { setMsg(e.message); }
@@ -161,8 +259,14 @@ function Console() {
 
   return (
     <div>
+      {notice && (
+        <Popup kind={notice.title.startsWith("Moved") ? "info" : "ok"} title={notice.title}
+          dismissLabel="Got it" onClose={() => setNotice(null)}>
+          {notice.body}
+        </Popup>
+      )}
       <div className="page-head"><span className="eyebrow"><span className="dot" /> Organizer</span><h1>Event console</h1>
-        <p className="lead">Five steps, in order: details, tracks, prizes, gallery access, then publish.</p></div>
+        <p className="lead">Six steps, in order: details, tracks, prizes, submission form, gallery access, then publish.</p></div>
 
       {/* Working event bar */}
       <div className="card field" style={{ padding: "14px 22px" }}>
@@ -184,7 +288,7 @@ function Console() {
               className={`step ${s.n < stepN || (s.key === "publish" && ev?.status === "PUBLISHED") ? "done" : s.n === stepN ? "now" : ""}`}
               style={{ background: "none", borderLeft: 0, borderRight: 0, borderBottom: 0, cursor: "pointer", textAlign: "left", font: "inherit" }}>
               <b><span className="n">{s.n < stepN ? "✓" : s.n}</span> {s.label}</b>
-              {s.key === "details" && ev ? ev.name : s.key === "tracks" && ev ? `${detail?.tracks?.length || 0} added` : s.key === "prizes" && ev ? `${detail?.prizes?.length || 0} added` : s.key === "gallery" && ev ? VIS_OPTIONS.find((o) => o.v === curVis)?.title : s.key === "publish" && ev ? ev.status : ""}
+              {s.key === "details" && ev ? ev.name : s.key === "tracks" && ev ? `${detail?.tracks?.length || 0} added` : s.key === "prizes" && ev ? `${detail?.prizes?.length || 0} added` : s.key === "form" && ev ? `${formFields.length} fields` : s.key === "gallery" && ev ? VIS_OPTIONS.find((o) => o.v === curVis)?.title : s.key === "publish" && ev ? ev.status : ""}
             </button>
           ))}
         </div>
@@ -240,13 +344,69 @@ function Console() {
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
               <button className="btn-ghost" onClick={() => goStep("tracks")}><I.back /> Back</button>
+              <button className="btn" onClick={() => goStep("form")}>Continue to submission form <I.arrow /></button>
+            </div></>)}</div>
+        )}
+
+        {step === "form" && (
+          <div>{!ev ? <p style={{ color: "var(--muted)" }}>Create an event first (Step 1).</p> : (
+          <><h2>Step 4 — Submission form ({formFields.length})</h2>
+            <p style={{ color: "var(--muted)" }}>Extra questions every team answers when submitting. Everything here is editable — change labels, types, requirements, or remove fields entirely.</p>
+            {!formFields.length && <p style={{ color: "var(--muted)" }}>No custom questions yet. Projects always ask for title, summary, description, links and track.</p>}
+            {formFields.map((f: any) => (
+              <div key={f.id} style={{ padding: "10px 0", borderTop: "1px solid var(--line)" }}>
+                {editingId === f.id ? (
+                  <div className="grid grid-3" style={{ gap: 8 }}>
+                    <input aria-label="Field label" value={editField.label} onChange={(e) => setEditField({ ...editField, label: e.target.value })} placeholder="Question" />
+                    <select aria-label="Field type" value={editField.field_type} onChange={(e) => setEditField({ ...editField, field_type: e.target.value })}>
+                      {FIELD_TYPES.map((t) => <option key={t.v} value={t.v}>{t.label}</option>)}
+                    </select>
+                    <input aria-label="Options, comma separated" value={editField.optionsText} onChange={(e) => setEditField({ ...editField, optionsText: e.target.value })} placeholder="Options (dropdown only, comma separated)" />
+                    <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13.5 }}>
+                      <input type="checkbox" checked={editField.required} onChange={(e) => setEditField({ ...editField, required: e.target.checked })} /> Required
+                    </label>
+                    <span style={{ display: "flex", gap: 8 }}>
+                      <button className="btn btn-sm" onClick={() => saveEdit(f.id)}>Save</button>
+                      <button className="btn-ghost btn-sm" onClick={() => setEditingId("")}>Cancel</button>
+                    </span>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                    <div><b>{f.label}</b>
+                      <div style={{ fontSize: 13, color: "var(--muted)" }}>{FIELD_TYPES.find((t) => t.v === f.field_type)?.label}{f.field_type === "select" ? `: ${(f.options || []).join(", ")}` : ""}</div></div>
+                    {f.required && <span className="badge badge-warn">Required</span>}
+                    <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                      <button className="btn-ghost btn-sm" onClick={() => toggleFieldRequired(f)}>{f.required ? "Make optional" : "Make required"}</button>
+                      <button className="btn-ghost btn-sm" onClick={() => startEdit(f)}>Edit</button>
+                      <button className="link-btn" onClick={() => deleteField(f.id)}>Remove</button>
+                    </span>
+                  </div>
+                )}
+              </div>
+            ))}
+            <h3 style={{ marginTop: 14 }}>Add a question</h3>
+            <div className="grid grid-3" style={{ gap: 8 }}>
+              <input aria-label="New question" value={newField.label} onChange={(e) => setNewField({ ...newField, label: e.target.value })} placeholder="e.g. Demo video link" />
+              <select aria-label="New field type" value={newField.field_type} onChange={(e) => setNewField({ ...newField, field_type: e.target.value })}>
+                {FIELD_TYPES.map((t) => <option key={t.v} value={t.v}>{t.label}</option>)}
+              </select>
+              <input aria-label="New field options" value={newField.optionsText} onChange={(e) => setNewField({ ...newField, optionsText: e.target.value })} placeholder="Options (dropdown only, comma separated)" />
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 14 }}>
+                <input type="checkbox" checked={newField.required} onChange={(e) => setNewField({ ...newField, required: e.target.checked })} /> Required to submit
+              </label>
+              <button className="btn" onClick={addField}>Add question</button>
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+              <button className="btn-ghost" onClick={() => goStep("prizes")}><I.back /> Back</button>
               <button className="btn" onClick={() => goStep("gallery")}>Continue to gallery access <I.arrow /></button>
             </div></>)}</div>
         )}
 
         {step === "gallery" && (
           <div>{!ev ? <p style={{ color: "var(--muted)" }}>Create an event first (Step 1).</p> : (
-          <><h2>Step 4 — Who can browse the gallery?</h2>
+          <><h2>Step 5 — Who can browse the gallery?</h2>
             <p style={{ color: "var(--muted)" }}>Drafts are always organizers-only. Once published, this setting decides who else gets in.</p>
             <div className="grid grid-3">
               {VIS_OPTIONS.map((o) => (
@@ -260,14 +420,14 @@ function Console() {
               ))}
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
-              <button className="btn-ghost" onClick={() => goStep("prizes")}><I.back /> Back</button>
+              <button className="btn-ghost" onClick={() => goStep("form")}><I.back /> Back</button>
               <button className="btn" onClick={() => goStep("publish")}>Continue to publish <I.arrow /></button>
             </div></>)}</div>
         )}
 
         {step === "publish" && (
           <div>{!ev ? <p style={{ color: "var(--muted)" }}>Create an event first (Step 1).</p> : (
-          <><h2>Step 5 — Review & publish</h2>
+          <><h2>Step 6 — Review & publish</h2>
             <p>Status: <span className={`badge ${ev.status === "PUBLISHED" ? "badge-ok" : "badge-muted"}`}>{ev.status}</span></p>
             <dl className="kv">
               <dt>Details</dt><dd>{ev.name} · closes {fmtDate(ev.submissions_close)}</dd>
@@ -293,6 +453,7 @@ function Console() {
           <div className="tabs">
             <button className={reviewTab === "submissions" ? "on" : ""} onClick={() => { setReviewTab("submissions"); loadReview(ev.id); }}>Submissions ({subs.length})</button>
             <button className={reviewTab === "people" ? "on" : ""} onClick={() => { setReviewTab("people"); loadReview(ev.id); }}>Participants ({people.length})</button>
+            <button className={reviewTab === "team" ? "on" : ""} onClick={() => { setReviewTab("team"); loadReview(ev.id); }}>Organizers ({orgs.length})</button>
             <button className="btn-ghost btn-sm" style={{ marginLeft: "auto" }} onClick={() => loadReview(ev.id)}>Refresh</button>
           </div>
           {reviewTab === "submissions" && (
@@ -325,6 +486,25 @@ function Console() {
                     {p.team_name ? <>Team: <b>{p.team_name}</b></> : "No team yet"} · joined {fmtDate(p.joined_at)}
                   </span>
                 </div>))}
+            </div>
+          )}
+          {reviewTab === "team" && (
+            <div>
+              <p style={{ color: "var(--muted)" }}>Only these accounts can open this event's console, edit it, or moderate its submissions. Everyone else gets nothing — not even a preview of a draft.</p>
+              <form onSubmit={addOrganizer} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", margin: "10px 0 4px" }}>
+                <div style={{ flex: "1 1 240px" }}><label htmlFor="org-email">Add an organizer by email</label>
+                  <input id="org-email" value={orgEmail} onChange={(e) => setOrgEmail(e.target.value)} placeholder="co-organizer@local.test" /></div>
+                <button className="btn" type="submit">Add organizer</button>
+              </form>
+              <p className="form-note" style={{ marginTop: 0 }}>The account must already have the organizer role. Adding someone here grants access to this event only — it never grants a role.</p>
+              {orgs.map((o: any) => (
+                <div key={o.user_id} style={{ display: "flex", gap: 10, padding: "8px 0", borderTop: "1px solid var(--line)", alignItems: "center", flexWrap: "wrap" }}>
+                  <b>{o.display_name}</b><span style={{ color: "var(--muted)" }}>{o.email}</span>
+                  <span className="badge badge-muted">{o.role}</span>
+                  {o.is_owner && <span className="badge badge-ok">Creator</span>}
+                  {!o.is_owner && <button className="link-btn" style={{ marginLeft: "auto" }} onClick={() => removeOrganizer(o.user_id)}>Remove</button>}
+                </div>))}
+              {!orgs.length && <p style={{ color: "var(--muted)" }}>No organizers listed.</p>}
             </div>
           )}
         </div>

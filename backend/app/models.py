@@ -77,6 +77,14 @@ class Event(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
+class EventOrganizer(Base):
+    """Who may manage an event. Created by `events.created_by` on create."""
+    __tablename__ = "event_organizers"
+    event_id = Column(Text, ForeignKey("events.id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(Text, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    assigned_by = Column(Text, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
 class EventParticipant(Base):
     __tablename__ = "event_participants"
     event_id = Column(Text, ForeignKey("events.id", ondelete="CASCADE"), primary_key=True)
@@ -164,11 +172,30 @@ class Project(Base):
     thumbnail_url = Column(Text, nullable=True)
     status = Column(SAEnum(ProjectStatus, name="project_status"), nullable=False, default=ProjectStatus.DRAFT, index=True)
     is_visible = Column(Boolean, nullable=False, default=True, server_default="true")
+    custom_data = Column(JSON, nullable=False, default=dict, server_default="{}")
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     submitted_at = Column(DateTime(timezone=True), nullable=True)
 
 Index("ix_projects_event_status", Project.event_id, Project.status)
+
+class AuditLog(Base):
+    """Append-only trail of security-relevant actions. Read by ADMIN only.
+
+    Actor columns are plain text rather than foreign keys on purpose: the
+    record of what happened must not disappear when an account does.
+    """
+    __tablename__ = "audit_log"
+    id = Column(Text, primary_key=True, default=_uuid)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+    actor_id = Column(Text, nullable=True, index=True)
+    actor_email = Column(Text, nullable=True)
+    action = Column(Text, nullable=False, index=True)
+    target_type = Column(Text, nullable=True)
+    target_id = Column(Text, nullable=True)
+    event_id = Column(Text, nullable=True, index=True)
+    detail = Column(JSON, nullable=False, default=dict, server_default="{}")
+    ip = Column(Text, nullable=True)
 
 class Judge(Base):
     __tablename__ = "judges"
@@ -181,6 +208,16 @@ class JudgeTrack(Base):
     __tablename__ = "judge_tracks"
     judge_id = Column(Text, ForeignKey("judges.id", ondelete="CASCADE"), primary_key=True)
     track_id = Column(Text, ForeignKey("tracks.id", ondelete="CASCADE"), primary_key=True)
+
+class EventFormField(Base):
+    __tablename__ = "event_form_fields"
+    id = Column(Text, primary_key=True, default=_uuid)
+    event_id = Column(Text, ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True)
+    label = Column(Text, nullable=False)
+    field_type = Column(Text, nullable=False, default="text")
+    required = Column(Boolean, nullable=False, default=False)
+    options = Column(JSON, nullable=False, default=list)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
 
 class Score(Base):
     __tablename__ = "scores"

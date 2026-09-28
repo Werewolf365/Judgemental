@@ -39,7 +39,7 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
         <p>{mode === "login" ? "Log in to manage your team, drafts and submissions." : "One account for every hackathon. Join events, form teams, submit projects."}</p>
         <div style={{ marginTop: 22, fontSize: 13.5, color: "#d7efe9" }}>
           Local demo logins — password <span className="mono" style={{ background: "rgba(255,255,255,.18)", color: "#fff", border: 0 }}>Local123!</span><br />
-          organizer@local.test · participant@local.test
+          admin@local.test · organizer@local.test · participant@local.test
         </div>
       </div>
       <form className="auth-form field" onSubmit={go}>

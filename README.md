@@ -1,4 +1,4 @@
-# Dogfood T1 Core — Hackathon Portal
+# T1 Core — Hackathon Portal
 
 Self-hostable hackathon platform (T1 vertical slice): organizer creates/publishes
 events, participants join, form teams via secure invite links, save drafts,

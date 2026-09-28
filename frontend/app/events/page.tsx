@@ -11,6 +11,7 @@ export default function Events() {
   const [q, setQ] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [loggedIn, setLoggedIn] = useState(false);
+  const [isStaff, setIsStaff] = useState(false);
   const [stateByEvent, setStateByEvent] = useState<Record<string, CardState>>({});
   const [notice, setNotice] = useState("");
 
@@ -18,6 +19,9 @@ export default function Events() {
     (async () => {
       const m = await fetchMe();
       setLoggedIn(!!m);
+      // Staff and judges run events; they are refused registration server-side,
+      // so their cards must not offer a "Register" button at all.
+      setIsStaff(!!m && ["ORGANIZER", "ADMIN", "JUDGE"].includes(m.role));
       const d = await api("/public/events").catch(() => ({ events: [] }));
       const list = d.events || [];
       setEvents(list);
@@ -59,8 +63,9 @@ export default function Events() {
               <p style={{ color: "var(--muted)" }}><I.clock /> Submissions close <b className="countdown">{fmtDate(e.submissions_close)}</b></p>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
                 {!loggedIn && <Link href="/login" className="btn btn-sm">Log in to join</Link>}
-                {loggedIn && !st?.joined && <Link href={`/events/${e.slug}`} className="btn btn-sm">Register <I.arrow /></Link>}
-                {loggedIn && st?.joined && <span className="badge badge-ok"><span className="pip pip-green" /> Registered</span>}
+                {loggedIn && isStaff && <span className="badge badge-track" title="Staff and judges run events rather than competing in them."><I.team /> Staff account</span>}
+                {loggedIn && !isStaff && !st?.joined && <Link href={`/events/${e.slug}`} className="btn btn-sm">Register <I.arrow /></Link>}
+                {loggedIn && !isStaff && st?.joined && <span className="badge badge-ok"><span className="pip pip-green" /> Registered</span>}
                 {loggedIn && st?.joined && st?.teamId && (
                   <Link href={`/submissions/new?team=${st.teamId}`} className="btn btn-sm">Submit project <I.arrow /></Link>
                 )}

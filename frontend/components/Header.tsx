@@ -35,6 +35,7 @@ export default function Header() {
             {me && link("/dashboard", isOrg ? "Overview" : "Dashboard")}
             {showTeams && link("/teams", "My teams")}
             {isOrg && link("/organizer", "Organize")}
+            {me?.role === "ADMIN" && link("/admin", "Admin")}
           </nav>
           <div className="header-right">
             {me === undefined ? null : me === null ? (

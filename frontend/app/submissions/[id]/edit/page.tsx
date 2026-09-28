@@ -2,9 +2,11 @@
 import { useEffect, useState } from "react";
 import { api, fetchMe, useCountdown } from "@/lib/api";
 import { I } from "@/components/art";
+import CustomAnswers from "@/components/CustomAnswers";
 
 export default function EditSub({ params }: { params: { id: string } }) {
   const [f, setF] = useState<any>(null);
+  const [custom, setCustom] = useState<Record<string, string>>({});
   const [deadline, setDeadline] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
@@ -16,6 +18,7 @@ export default function EditSub({ params }: { params: { id: string } }) {
       try {
         const d = await api(`/submissions/${params.id}`);
         setF(d.project);
+        setCustom(d.project.custom_data || {});
         // Public endpoint hides unpublished events — fall back to the
         // authenticated one so the countdown still shows for drafts.
         try {
@@ -29,7 +32,7 @@ export default function EditSub({ params }: { params: { id: string } }) {
 
   async function save() {
     setBusy(true); setMsg("");
-    try { const d = await api(`/submissions/${params.id}`, { method: "PATCH", body: JSON.stringify(f) }); setF(d.project); setMsg("Draft saved."); }
+    try { const d = await api(`/submissions/${params.id}`, { method: "PATCH", body: JSON.stringify({ ...f, custom_data: custom }) }); setF(d.project); setCustom(d.project.custom_data || {}); setMsg("Draft saved."); }
     catch (e: any) { setMsg(e.message); }
     finally { setBusy(false); }
   }
@@ -66,6 +69,7 @@ export default function EditSub({ params }: { params: { id: string } }) {
           <label>Repository URL</label><input value={f.repo_url || ""} disabled={closed || busy} onChange={(e) => setF({ ...f, repo_url: e.target.value })} />
           <label>Demo URL</label><input value={f.demo_url || ""} disabled={closed || busy} onChange={(e) => setF({ ...f, demo_url: e.target.value })} />
           <label>Live URL</label><input value={f.live_url || ""} disabled={closed || busy} onChange={(e) => setF({ ...f, live_url: e.target.value })} />
+          <CustomAnswers eventId={f.event_id} value={custom} onChange={setCustom} disabled={closed || busy} />
         </div>
         <div>
           <div className="card"><h2>Publish</h2>
