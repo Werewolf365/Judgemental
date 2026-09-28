@@ -229,7 +229,18 @@ async def join_event(event_id: str, body: RegistrationForm, db: AsyncSession = D
         }
     )
     await db.execute(stmt2)
-    
+
+    # The submitted form counts as updating the reusable profile: next
+    # event's registration prefills from these values (still editable there).
+    u = await db.get(User, user.id)
+    u.profile_phone = body.phone.strip()
+    u.profile_age = body.age
+    u.profile_degree = body.degree.strip()
+    u.profile_year = body.yearOfStudy.strip()
+    u.profile_institution = body.institution.strip()
+    u.profile_tshirt = (body.tshirtSize or "").strip() or None
+    u.profile_dietary = (body.dietaryRestrictions or "").strip() or None
+
     await db.commit()
     return {"ok": True}
 

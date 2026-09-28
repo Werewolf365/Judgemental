@@ -66,6 +66,15 @@ class User(Base):
     display_name = Column(Text, nullable=False, default="")
     avatar_url = Column(Text, nullable=True)
     role = Column(SAEnum(Role, name="user_role"), nullable=False, default=Role.PARTICIPANT)
+    # Reusable registration profile (migration 0017): generic contact/academic
+    # details saved once, prefilled into every event registration form.
+    profile_phone = Column(Text, nullable=True)
+    profile_age = Column(Integer, nullable=True)
+    profile_degree = Column(Text, nullable=True)
+    profile_year = Column(Text, nullable=True)
+    profile_institution = Column(Text, nullable=True)
+    profile_tshirt = Column(Text, nullable=True)
+    profile_dietary = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 

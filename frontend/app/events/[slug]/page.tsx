@@ -23,11 +23,6 @@ type RegForm = {
   degree: string; yearOfStudy: string; institution: string;
   dietaryRestrictions: string; tshirtSize: string;
 };
-const EMPTY_FORM: RegForm = {
-  fullName: "", email: "", phone: "", age: "",
-  degree: "", yearOfStudy: "", institution: "",
-  dietaryRestrictions: "", tshirtSize: "",
-};
 type RegErrors = Partial<Record<keyof RegForm, string>>;
 
 function validate(f: RegForm): RegErrors {
@@ -56,7 +51,16 @@ function RegistrationOverlay({
 }: {
   me: Me; onComplete: (data: RegForm) => void; onCancel: () => void;
 }) {
-  const [form, setForm] = useState<RegForm>({ ...EMPTY_FORM, fullName: me?.display_name || "", email: me?.email || "" });
+  const [form, setForm] = useState<RegForm>(() => ({
+    fullName: me?.display_name || "", email: me?.email || "",
+    phone: me?.profile?.phone || "",
+    age: me?.profile?.age != null ? String(me.profile.age) : "",
+    degree: me?.profile?.degree || "",
+    yearOfStudy: me?.profile?.year_of_study || "",
+    institution: me?.profile?.institution || "",
+    dietaryRestrictions: me?.profile?.dietary_restrictions || "",
+    tshirtSize: me?.profile?.tshirt_size || "",
+  }));
   const [errors, setErrors] = useState<RegErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [serverErr, setServerErr] = useState("");
@@ -91,7 +95,8 @@ function RegistrationOverlay({
         <span className="eyebrow" style={{ marginBottom: 6 }}><span className="dot" /> Registration</span>
         <h2 style={{ marginTop: 6, marginBottom: 2 }}>Participant details</h2>
         <p className="form-note" style={{ marginBottom: 18 }}>
-          Fill out the form below to complete your registration. You'll set up your team in the next step.
+          Fill out the form below to complete your registration. Details you
+          save here are remembered on your profile for next time.
         </p>
 
         {serverErr && <div className="form-error">{serverErr}</div>}
@@ -241,6 +246,7 @@ export default function EventPage({ params }: { params: { slug: string } }) {
     try {
       await api(`/events/${data.event.id}/join`, { method: "POST", body: JSON.stringify(regData) });
       setJoined(true);
+      setMe(await fetchMe());
       setMsg("Registration complete! Redirecting to your workspace to create a team…");
       // Give the user a moment to read the message, then redirect to dashboard
       // with the event preselected for team creation.

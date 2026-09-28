@@ -14,7 +14,16 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 def user_out(u: User) -> dict:
     return {"id": u.id, "email": u.email, "display_name": u.display_name, "role": u.role.value if hasattr(u.role, "value") else str(u.role),
-            "avatar_url": getattr(u, "avatar_url", None)}
+            "avatar_url": getattr(u, "avatar_url", None),
+            "profile": {
+                "phone": getattr(u, "profile_phone", None),
+                "age": getattr(u, "profile_age", None),
+                "degree": getattr(u, "profile_degree", None),
+                "year_of_study": getattr(u, "profile_year", None),
+                "institution": getattr(u, "profile_institution", None),
+                "tshirt_size": getattr(u, "profile_tshirt", None),
+                "dietary_restrictions": getattr(u, "profile_dietary", None),
+            }}
 
 async def _create_session(db: AsyncSession, user: User, ua: str | None) -> str:
     raw = new_session_token()
@@ -107,6 +116,43 @@ async def update_me(body: dict, db: AsyncSession = Depends(get_db), user: User =
             if len(av) > 300_000:
                 err(422, "validation_error", "avatar image is too large")
         u.avatar_url = av
+    if "profile" in body:
+        # Reusable registration details. Every field is optional; empty
+        # clears it back to unset. Same bounds as event registration so a
+        # value saved here always validates there.
+        p = body.get("profile") or {}
+        if not isinstance(p, dict):
+            err(422, "validation_error", "profile must be an object")
+        if "phone" in p:
+            ph = (p.get("phone") or "").strip() or None
+            if ph is not None:
+                import re as _re
+                if len(ph) > 40 or not _re.match(r"^\+?[\d\s\-()]{7,18}$", ph):
+                    err(422, "validation_error", "Enter a valid phone number")
+            u.profile_phone = ph
+        if "age" in p:
+            raw = p.get("age")
+            if raw is None or (isinstance(raw, str) and not raw.strip()):
+                u.profile_age = None
+            else:
+                try:
+                    age = int(raw) if not isinstance(raw, bool) else 0
+                except (TypeError, ValueError):
+                    err(422, "validation_error", "Age must be a whole number")
+                if age < 1 or age > 150:
+                    err(422, "validation_error", "Age must be between 1 and 150")
+                u.profile_age = age
+        for key, col, cap in (("degree", "profile_degree", 100),
+                              ("year_of_study", "profile_year", 50),
+                              ("institution", "profile_institution", 300),
+                              ("tshirt_size", "profile_tshirt", 10),
+                              ("dietary_restrictions", "profile_dietary", 500)):
+            if key in p:
+                v = p.get(key)
+                v = (str(v).strip() or None) if v is not None else None
+                if v is not None and len(v) > cap:
+                    err(422, "validation_error", f"profile {key} is too long")
+                setattr(u, col, v)
     await db.commit()
     await db.refresh(u)
     return {"user": user_out(u)}

@@ -11,6 +11,8 @@ export default function Settings() {
   const [pwMsg, setPwMsg] = useState("");
   const [avatar, setAvatar] = useState<string | null>(null);
   const [avatarMsg, setAvatarMsg] = useState("");
+  const [prof, setProf] = useState({ phone: "", age: "", degree: "", yearOfStudy: "", institution: "", tshirtSize: "", dietaryRestrictions: "" });
+  const [profMsg, setProfMsg] = useState("");
   const router = useRouter();
 
   useEffect(() => {
@@ -19,6 +21,13 @@ export default function Settings() {
       if (!m) { router.push("/login"); return; }
       setName(m.display_name);
       setAvatar((m as any).avatar_url || null);
+      const p = (m as any).profile || {};
+      setProf({
+        phone: p.phone || "", age: p.age != null ? String(p.age) : "",
+        degree: p.degree || "", yearOfStudy: p.year_of_study || "",
+        institution: p.institution || "", tshirtSize: p.tshirt_size || "",
+        dietaryRestrictions: p.dietary_restrictions || "",
+      });
     })();
   }, [router]);
 
@@ -71,6 +80,35 @@ export default function Settings() {
     } catch (e: any) { setPwMsg(e.message); }
   }
 
+  function setP<K extends keyof typeof prof>(key: K, val: string) {
+    setProf((p) => ({ ...p, [key]: val }));
+  }
+
+  async function saveProf(e: React.FormEvent) {
+    e.preventDefault(); setProfMsg("");
+    if (prof.phone.trim() && !/^\+?[\d\s\-()]{7,18}$/.test(prof.phone.trim())) { setProfMsg("Enter a valid phone number."); return; }
+    if (prof.age.trim()) {
+      const n = Number(prof.age);
+      if (!Number.isInteger(n) || n < 13 || n > 120) { setProfMsg("Age must be between 13 and 120."); return; }
+    }
+    try {
+      const d = await api("/auth/me", { method: "PATCH", body: JSON.stringify({ profile: {
+        phone: prof.phone.trim(), age: prof.age.trim() === "" ? null : Number(prof.age),
+        degree: prof.degree, year_of_study: prof.yearOfStudy,
+        institution: prof.institution.trim(), tshirt_size: prof.tshirtSize,
+        dietary_restrictions: prof.dietaryRestrictions.trim(),
+      } }) });
+      const p = (d.user as any).profile || {};
+      setProf({
+        phone: p.phone || "", age: p.age != null ? String(p.age) : "",
+        degree: p.degree || "", yearOfStudy: p.year_of_study || "",
+        institution: p.institution || "", tshirtSize: p.tshirt_size || "",
+        dietaryRestrictions: p.dietary_restrictions || "",
+      });
+      setProfMsg("Registration details saved — next event's form will prefill from these.");
+    } catch (e: any) { setProfMsg(e.message); }
+  }
+
   return (
     <div>
       <div className="page-head"><span className="eyebrow"><span className="dot" /> Account</span><h1>Settings</h1></div>
@@ -101,6 +139,53 @@ export default function Settings() {
           <input type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" />
           {pwMsg && <p>{pwMsg}</p>}
           <button className="btn" type="submit">Change password</button>
+        </form>
+        <form className="card field" onSubmit={saveProf}>
+          <h2>Registration details</h2>
+          <p className="form-note">Save once, reuse everywhere — every event's registration form prefills from these, and you can still edit them per event.</p>
+          <div className="reg-row">
+            <div className="reg-col">
+              <label>Phone number</label>
+              <input type="tel" value={prof.phone} onChange={(e) => setP("phone", e.target.value)} placeholder="+91 98765 43210" />
+            </div>
+            <div className="reg-col" style={{ maxWidth: 130 }}>
+              <label>Age</label>
+              <input type="number" min={13} max={120} value={prof.age} onChange={(e) => setP("age", e.target.value)} placeholder="20" />
+            </div>
+          </div>
+          <div className="reg-row">
+            <div className="reg-col">
+              <label>Degree / program</label>
+              <select value={prof.degree} onChange={(e) => setP("degree", e.target.value)}>
+                <option value="">Select…</option>
+                {["B.Tech / B.E.", "B.Sc", "BCA", "M.Tech / M.E.", "M.Sc", "MCA", "MBA", "Ph.D.", "Diploma", "Other"].map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </div>
+            <div className="reg-col">
+              <label>Year of study</label>
+              <select value={prof.yearOfStudy} onChange={(e) => setP("yearOfStudy", e.target.value)}>
+                <option value="">Select…</option>
+                {["1st Year", "2nd Year", "3rd Year", "4th Year", "5th Year", "Graduated"].map((y) => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </div>
+          </div>
+          <label>Institution / college</label>
+          <input value={prof.institution} onChange={(e) => setP("institution", e.target.value)} placeholder="Indian Institute of Technology Bombay" maxLength={300} />
+          <div className="reg-row">
+            <div className="reg-col">
+              <label>T-shirt size</label>
+              <select value={prof.tshirtSize} onChange={(e) => setP("tshirtSize", e.target.value)}>
+                <option value="">N/A</option>
+                {["XS", "S", "M", "L", "XL", "XXL"].map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div className="reg-col">
+              <label>Dietary restrictions</label>
+              <input value={prof.dietaryRestrictions} onChange={(e) => setP("dietaryRestrictions", e.target.value)} placeholder="None, Vegetarian…" maxLength={500} />
+            </div>
+          </div>
+          {profMsg && <p>{profMsg}</p>}
+          <button className="btn" type="submit">Save details</button>
         </form>
       </div>
     </div>

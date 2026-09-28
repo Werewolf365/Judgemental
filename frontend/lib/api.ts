@@ -1,4 +1,9 @@
-export type Me = { id: string; email: string; display_name: string; role: string; avatar_url?: string | null } | null;
+export type MeProfile = {
+  phone?: string | null; age?: number | null; degree?: string | null;
+  year_of_study?: string | null; institution?: string | null;
+  tshirt_size?: string | null; dietary_restrictions?: string | null;
+};
+export type Me = { id: string; email: string; display_name: string; role: string; avatar_url?: string | null; profile?: MeProfile | null } | null;
 
 export async function api(path: string, opts: RequestInit = {}) {
   const res = await fetch(path.startsWith("http") ? path : `/api${path}`, {
