@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, fetchMe } from "@/lib/api";
 import { HeroScene, ProjectArt, I } from "@/components/art";
 
 export default function Home() {
@@ -9,8 +9,10 @@ export default function Home() {
   const [projects, setProjects] = useState<any[]>([]);
   const [spotlightSlug, setSpotlightSlug] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const [role, setRole] = useState<string | null>(null);
 
   useEffect(() => {
+    fetchMe().then((m) => setRole(m?.role || null)).catch(() => {});
     api("/public/events").then((d) => {
       setEvents(d.events || []);
       const slug = d.events?.[0]?.slug;
@@ -21,6 +23,12 @@ export default function Home() {
     }).catch(() => {}).finally(() => setLoaded(true));
   }, []);
 
+  // Organizer boxes must never be offered to accounts that cannot use them:
+  // participants compete from the workspace, judges from their console.
+  const isOrg = role === "ORGANIZER" || role === "ADMIN";
+  const isJudge = role === "JUDGE";
+  const isParticipant = role === "PARTICIPANT";
+
   return (
     <div>
       <section className="hero">
@@ -30,8 +38,16 @@ export default function Home() {
           <h1>Run hackathons on your<br />own infrastructure.</h1>
           <p>Dogfood is a self-hosted platform for managing hackathon events: publish events, form teams with secure invitations, collect submissions before a server-enforced deadline, and present every project in a public gallery. No cloud accounts or external services required.</p>
           <div className="hero-cta">
-            <Link href="/organizer?new=1" className="btn">Create New Event <I.arrow /></Link>
-            <Link href="/dashboard" className="btn-ghost">Manage My Events</Link>
+            {isParticipant ? (
+              <><Link href="/events" className="btn">Find your event <I.arrow /></Link>
+              <Link href="/dashboard" className="btn-ghost">Go to workspace</Link></>
+            ) : isJudge ? (
+              <><Link href="/judge" className="btn">Open judging console <I.arrow /></Link>
+              <Link href="/events" className="btn-ghost">Browse events</Link></>
+            ) : (
+              <><Link href="/organizer?new=1" className="btn">Create New Event <I.arrow /></Link>
+              <Link href="/dashboard" className="btn-ghost">Manage My Events</Link></>
+            )}
           </div>
         </div>
         <div className="hero-glassbar">
@@ -47,9 +63,25 @@ export default function Home() {
       </svg>
 
       <div className="grid grid-3">
-        <div className="card"><h3><I.pin /> Launch</h3><p style={{ color: "var(--muted)" }}>Spin up a new event page in seconds. Set your dates, tracks, and prizes, then publish when you're ready.</p><Link href="/organizer?new=1">Create event <I.arrow /></Link></div>
-        <div className="card"><h3><I.team /> Review</h3><p style={{ color: "var(--muted)" }}>Track team formations and monitor project drafts. Ensure all submissions land smoothly before the clock runs out.</p><Link href="/organizer">Review submissions <I.arrow /></Link></div>
-        <div className="card"><h3><I.cal /> Run</h3><p style={{ color: "var(--muted)" }}>Configure deadlines, manage participants, and watch the live dashboard as your event unfolds.</p><Link href="/organizer">Organizer console <I.arrow /></Link></div>
+        {isParticipant ? (
+          <>
+            <div className="card"><h3><I.pin /> Join</h3><p style={{ color: "var(--muted)" }}>Register for an event in seconds. Your team picks its track later, together, when it creates its project.</p><Link href="/events">Browse events <I.arrow /></Link></div>
+            <div className="card"><h3><I.team /> Team up</h3><p style={{ color: "var(--muted)" }}>Create a team or paste a teammate's invite link. One team per event, one submission per team.</p><Link href="/dashboard">Go to workspace <I.arrow /></Link></div>
+            <div className="card"><h3><I.cal /> Submit</h3><p style={{ color: "var(--muted)" }}>Save a draft, pick your team's track, and submit before the server-enforced UTC deadline.</p><Link href="/submissions/new">Start a project <I.arrow /></Link></div>
+          </>
+        ) : isJudge ? (
+          <>
+            <div className="card"><h3><I.pin /> Assignments</h3><p style={{ color: "var(--muted)" }}>Your judging workload lives in one place — open work, drafts, and submitted scores.</p><Link href="/judge">Open console <I.arrow /></Link></div>
+            <div className="card"><h3><I.team /> Score</h3><p style={{ color: "var(--muted)" }}>Save a draft for each project, review it, then submit. Submissions lock once final.</p><Link href="/judge">Score projects <I.arrow /></Link></div>
+            <div className="card"><h3><I.cal /> Browse</h3><p style={{ color: "var(--muted)" }}>Explore published events and their public galleries while you wait for assignments.</p><Link href="/events">Browse events <I.arrow /></Link></div>
+          </>
+        ) : (
+          <>
+            <div className="card"><h3><I.pin /> Launch</h3><p style={{ color: "var(--muted)" }}>Spin up a new event page in seconds. Set your dates, tracks, and prizes, then publish when you're ready.</p><Link href="/organizer?new=1">Create event <I.arrow /></Link></div>
+            <div className="card"><h3><I.team /> Review</h3><p style={{ color: "var(--muted)" }}>Track team formations and monitor project drafts. Ensure all submissions land smoothly before the clock runs out.</p><Link href="/organizer">Review submissions <I.arrow /></Link></div>
+            <div className="card"><h3><I.cal /> Run</h3><p style={{ color: "var(--muted)" }}>Configure deadlines, manage participants, and watch the live dashboard as your event unfolds.</p><Link href="/organizer">Organizer console <I.arrow /></Link></div>
+          </>
+        )}
       </div>
 
       <div className="page-head" style={{ display: "flex", alignItems: "baseline", gap: 14 }}>

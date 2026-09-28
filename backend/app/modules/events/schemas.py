@@ -32,7 +32,7 @@ class RegistrationForm(BaseModel):
     degree: str = Field(max_length=100)
     yearOfStudy: str = Field(max_length=50)
     institution: str = Field(max_length=300)
-    category: str = Field(max_length=100)
+    category: str = Field(default="", max_length=100)
     tshirtSize: Optional[str] = Field(default="", max_length=10)
     dietaryRestrictions: Optional[str] = Field(default="", max_length=500)
 

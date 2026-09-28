@@ -17,17 +17,16 @@ const DEGREE_OPTIONS = [
   "MBA", "Ph.D.", "Diploma", "Other",
 ];
 const YEAR_OPTIONS = ["", "1st Year", "2nd Year", "3rd Year", "4th Year", "5th Year", "Graduated"];
-const CATEGORY_OPTIONS = ["", "Open Innovation", "AI / ML", "Web3 / Blockchain", "FinTech", "HealthTech", "EdTech", "Sustainability", "Other"];
 
 type RegForm = {
   fullName: string; email: string; phone: string; age: string;
   degree: string; yearOfStudy: string; institution: string;
-  category: string; dietaryRestrictions: string; tshirtSize: string;
+  dietaryRestrictions: string; tshirtSize: string;
 };
 const EMPTY_FORM: RegForm = {
   fullName: "", email: "", phone: "", age: "",
   degree: "", yearOfStudy: "", institution: "",
-  category: "", dietaryRestrictions: "", tshirtSize: "",
+  dietaryRestrictions: "", tshirtSize: "",
 };
 type RegErrors = Partial<Record<keyof RegForm, string>>;
 
@@ -43,7 +42,6 @@ function validate(f: RegForm): RegErrors {
   if (!f.degree) e.degree = "Select your degree / program.";
   if (!f.yearOfStudy) e.yearOfStudy = "Select your year of study.";
   if (!f.institution.trim()) e.institution = "Institution name is required.";
-  if (!f.category) e.category = "Select a competition category.";
   return e;
 }
 
@@ -54,9 +52,9 @@ function FieldErr({ msg }: { msg?: string }) {
 
 /* ─── Registration overlay ─── */
 function RegistrationOverlay({
-  me, tracks, onComplete, onCancel,
+  me, onComplete, onCancel,
 }: {
-  me: Me; tracks: { id: string; name: string }[]; onComplete: (data: RegForm) => void; onCancel: () => void;
+  me: Me; onComplete: (data: RegForm) => void; onCancel: () => void;
 }) {
   const [form, setForm] = useState<RegForm>({ ...EMPTY_FORM, fullName: me?.display_name || "", email: me?.email || "" });
   const [errors, setErrors] = useState<RegErrors>({});
@@ -157,24 +155,16 @@ function RegistrationOverlay({
             placeholder="Indian Institute of Technology Bombay" className={errors.institution ? "has-error" : ""} />
           <FieldErr msg={errors.institution} />
 
-          {/* Row 5 — Category / T-shirt */}
-          <div className="reg-row">
-            <div className="reg-col">
-              <label htmlFor="reg-category">Competition category *</label>
-              <select id="reg-category" value={form.category} onChange={(e) => set("category", e.target.value)} className={errors.category ? "has-error" : ""}>
-                <option value="" disabled>Select…</option>
-                {(tracks.length ? tracks.map((t) => t.name) : CATEGORY_OPTIONS.filter(Boolean)).map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-              <FieldErr msg={errors.category} />
-            </div>
-            <div className="reg-col">
-              <label htmlFor="reg-tshirt">T-shirt size</label>
-              <select id="reg-tshirt" value={form.tshirtSize} onChange={(e) => set("tshirtSize", e.target.value)}>
-                <option value="">N/A</option>
-                {["XS", "S", "M", "L", "XL", "XXL"].map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-          </div>
+          {/* Row 5 — T-shirt */}
+          <label htmlFor="reg-tshirt">T-shirt size</label>
+          <select id="reg-tshirt" value={form.tshirtSize} onChange={(e) => set("tshirtSize", e.target.value)}>
+            <option value="">N/A</option>
+            {["XS", "S", "M", "L", "XL", "XXL"].map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <p className="form-note" style={{ marginTop: 8 }}>
+            Which track will you compete in? Nothing to pick here — your team chooses
+            one track when it creates its project, so every teammate is on the same track by construction.
+          </p>
 
           {/* Row 6 — Dietary */}
           <label htmlFor="reg-dietary">Dietary restrictions</label>
@@ -276,7 +266,7 @@ export default function EventPage({ params }: { params: { slug: string } }) {
   return (
     <div>
       {showRegForm && !isStaff && (
-        <RegistrationOverlay me={me} tracks={data?.tracks || []} onComplete={completeRegistration} onCancel={() => setShowRegForm(false)} />
+        <RegistrationOverlay me={me} onComplete={completeRegistration} onCancel={() => setShowRegForm(false)} />
       )}
       <div className="hero" style={{ paddingBottom: 0 }}>
         <HeroScene />

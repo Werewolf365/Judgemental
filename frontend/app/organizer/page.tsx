@@ -293,7 +293,7 @@ function Console() {
   }
 
   if (!me && !msg) return <div className="card">Loading console…</div>;
-  if (msg && !me) return <div className="card empty"><h3>Access restricted</h3><p>{msg}</p><p className="form-note">Log in as organizer@local.test to manage events.</p></div>;
+  if (msg && !me) return <div className="card empty"><h3>Access restricted</h3><p>{msg}</p><p><a href="/dashboard" className="btn">Go to workspace</a></p><p className="form-note">Organizers manage events here — participants compete from the workspace.</p></div>;
 
   const ev = detail?.event;
   const curVis = (ev?.gallery_visibility || "PUBLIC").toUpperCase();

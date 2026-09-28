@@ -106,6 +106,7 @@ function ParticipantHome({ me }: { me: Me }) {
   const [teamName, setTeamName] = useState("");
   const [eventId, setEventId] = useState("");
   const [joined, setJoined] = useState<boolean | null>(null);
+  const [inviteInput, setInviteInput] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -162,6 +163,21 @@ function ParticipantHome({ me }: { me: Me }) {
     } catch (e: any) { setMsg(e.message); }
   }
 
+  async function joinWithLink(e: React.FormEvent) {
+    e.preventDefault(); setMsg("");
+    const raw = inviteInput.trim();
+    if (!raw) { setMsg("Paste an invite link or token first."); return; }
+    const token = raw.includes("/teams/join/")
+      ? raw.split("/teams/join/").pop()!.split(/[?#\s]/)[0]
+      : raw.split(/\s/).pop()!;
+    try {
+      const d = await api(`/teams/join/${token}`, { method: "POST", body: "{}" });
+      setInviteInput("");
+      setMsg(d.already ? "You're already a member of this team." : "You've joined the team.");
+      setTeams((await api("/teams")).teams || []);
+    } catch (e: any) { setMsg(e.message); }
+  }
+
   if (loading) return <div className="card"><div className="skel" style={{ height: 200 }} /></div>;
 
   const step = (n: number, title: string, sub: string) => (
@@ -196,6 +212,12 @@ function ParticipantHome({ me }: { me: Me }) {
               <button className="btn-ghost btn-sm" style={{ marginLeft: "auto" }} onClick={() => invite(t.id)}>Copy invite link</button>
             </div>
           ))}
+          <h3 style={{ marginTop: 16 }}>Join a team</h3>
+          <p className="form-note">Got an invite link from a teammate? Paste it here.</p>
+          <form onSubmit={joinWithLink} style={{ display: "flex", gap: 8 }}>
+            <input value={inviteInput} onChange={(e) => setInviteInput(e.target.value)} placeholder="https://…/teams/join/…" style={{ flex: 1 }} />
+            <button className="btn-ghost" type="submit">Join team</button>
+          </form>
           <h3 style={{ marginTop: 16 }}>Create a team</h3>
           <form onSubmit={createTeam}>
             <label>Event</label>

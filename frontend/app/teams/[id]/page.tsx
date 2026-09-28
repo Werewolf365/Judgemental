@@ -7,11 +7,30 @@ export default function TeamDetail({ params }: { params: { id: string } }) {
   const [team, setTeam] = useState<any>(null);
   const [me, setMe] = useState<any>(null);
   const [msg, setMsg] = useState("");
+  const [proj, setProj] = useState<any>(null);
+  const [projChecked, setProjChecked] = useState(false);
+  const [trackName, setTrackName] = useState("");
   useEffect(() => {
     (async () => {
       const m = await fetchMe(); setMe(m);
       if (!m) { window.location.href = "/login"; return; }
-      try { setTeam((await api(`/teams/${params.id}`)).team); }
+      try {
+        const t = (await api(`/teams/${params.id}`)).team;
+        setTeam(t);
+        // One submission per team, one track per submission: the project is
+        // the single source of truth for "which track is this team on".
+        try {
+          const s = await api("/submissions").catch(() => ({ projects: [] }));
+          const mine = (s.projects || []).find((p: any) => p.team_id === params.id) || null;
+          setProj(mine);
+          if (mine?.track_id) {
+            const tr = await api(`/events/${t.event_id}/tracks`).catch(() => ({ tracks: [] }));
+            const hit = (tr.tracks || []).find((x: any) => x.id === mine.track_id);
+            setTrackName(hit ? hit.name : "");
+          }
+        } catch { /* staff/edge: project card simply stays hidden */ }
+        finally { setProjChecked(true); }
+      }
       catch (e: any) { setMsg(e.message); }
     })();
   }, [params.id]);
@@ -36,9 +55,24 @@ export default function TeamDetail({ params }: { params: { id: string } }) {
 
   if (!team) return <div className="card">{msg || "Loading…"}</div>;
   const isCaptain = team.members?.some((m: any) => m.user_id === me?.id && m.role === "CAPTAIN");
+  const isMember = team.members?.some((m: any) => m.user_id === me?.id);
   return (
     <div>
       <div className="page-head"><span className="eyebrow"><span className="dot" /> Team</span><h1>{team.name}</h1></div>
+      {isMember && projChecked && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h2><I.doc /> Team project</h2>
+          {proj ? (
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <b><a href={`/submissions/${proj.id}/edit`}>{proj.title}</a></b>
+              {trackName && <span className="badge badge-track">{trackName}</span>}
+              <span className={`badge ${proj.status === "SUBMITTED" ? "badge-ok" : "badge-warn"}`}>{proj.status}</span>
+            </div>
+          ) : (
+            <p style={{ color: "var(--muted)", margin: 0 }}>No project yet — the team picks one track when it creates its project, so nobody can end up on a different track.</p>
+          )}
+        </div>
+      )}
       <div className="grid grid-2">
         <div className="card"><h2><I.team /> Members ({team.members?.length || 0})</h2>
           {(team.members || []).map((m: any) => (
