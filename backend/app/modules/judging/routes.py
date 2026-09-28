@@ -13,6 +13,7 @@ from app.modules.auth.dependencies import require_roles
 from app.modules.events.access import managed_event
 from app.modules.events.routes import parse_dt
 from app.modules.judging import assign as assign_svc
+from app.modules.judging import scheduler
 from app.modules.judging import service
 from app.modules.judging.schemas import CriterionIn, JudgingConfigIn, JudgeAssignIn
 from app.shared.audit import record
@@ -47,6 +48,10 @@ async def create_criterion(event_id: str, body: CriterionIn, request: Request,
     if await service.rubric_locked(db, e):
         err(409, "invalid_state_transition",
             "Judging has started — the rubric is locked so submitted scores keep their meaning")
+    if body.weight is not None:
+        res = await db.execute(select(RubricCriterion).where(
+            RubricCriterion.event_id == e.id, RubricCriterion.is_active == True))  # noqa
+        service.check_weight_cap(res.scalars().all(), None, body.weight)
     c = RubricCriterion(id=f"rub_{uuid.uuid4().hex[:8]}", event_id=e.id,
                         name=body.name, description=body.description,
                         weight=body.weight, display_order=body.display_order)
@@ -76,6 +81,10 @@ async def patch_criterion(criterion_id: str, body: CriterionIn, request: Request
     if await service.rubric_locked(db, e):
         err(409, "invalid_state_transition",
             "Judging has started — the rubric is locked so submitted scores keep their meaning")
+    if body.weight is not None:
+        res = await db.execute(select(RubricCriterion).where(
+            RubricCriterion.event_id == e.id, RubricCriterion.is_active == True))  # noqa
+        service.check_weight_cap(res.scalars().all(), c.id, body.weight)
     c.name = body.name
     c.description = body.description
     c.weight = body.weight
@@ -141,6 +150,12 @@ async def judging_status(event_id: str, db: AsyncSession = Depends(get_db),
         "config": {
             "judging_open": f(e.judging_open), "judging_close": f(e.judging_close),
             "judges_per_project": e.judges_per_project, "rolling_judging": e.rolling_judging,
+        },
+        "auto_assign": {
+            "enabled": scheduler.state["enabled"],
+            "every_seconds": scheduler.state["every_seconds"],
+            "last_run": scheduler.state["last_run"],
+            "last_created": scheduler.state["last_created"],
         },
         "stage": await service.judging_stage(db, e),
         "rubric_locked": await service.rubric_locked(db, e),
@@ -251,8 +266,9 @@ async def batch_assign(event_id: str, request: Request,
     """One-big-assignment mode: fill every under-assigned SUBMITTED project.
 
     Idempotent — running it twice changes nothing the second time. This is
-    also the explicit trigger for rolling_judging=false events (there is no
-    scheduler, so deadline-close cannot fire it by itself).
+    also the explicit trigger for rolling_judging=false events; the
+    background sweep (judging/scheduler.py) runs the same pass on its own
+    cadence and is never reset, skipped, or doubled by this button.
     """
     e = await managed_event(db, user, event_id)
     if await service.judging_stage(db, e) in ("CLOSED", "RESULTS_READY"):

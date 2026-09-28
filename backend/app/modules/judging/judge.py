@@ -41,6 +41,10 @@ async def _own_assignment(db: AsyncSession, assignment_id: str, user: User) -> J
     if not a or a.judge_user_id != user.id:
         # Same answer for missing and someone else's: no id oracle.
         err(403, "forbidden", "No such assignment")
+    if (a.status.value if hasattr(a.status, "value") else str(a.status)) == "REVOKED":
+        # Removed from the roster: revoked work is no longer yours, and a
+        # bookmarked URL must not keep the project readable.
+        err(403, "forbidden", "No such assignment")
     return a
 
 
@@ -84,11 +88,14 @@ async def _editable_assignment(db: AsyncSession, a: JudgeAssignment, user: User)
 @router.get("/judge/assignments")
 async def my_assignments(db: AsyncSession = Depends(get_db),
                          user: User = Depends(_judge())):
+    # REVOKED rows are excluded outright: once the organizer removes a
+    # judge, their dashboard goes empty instead of listing dead work.
     res = await db.execute(
         select(JudgeAssignment, Project.title, Track.name).join(
             Project, Project.id == JudgeAssignment.project_id).join(
             Track, Track.id == Project.track_id).where(
-            JudgeAssignment.judge_user_id == user.id).order_by(
+            JudgeAssignment.judge_user_id == user.id,
+            JudgeAssignment.status != AssignmentStatus.REVOKED).order_by(
             JudgeAssignment.created_at.desc()))
     out = []
     for a, title, track in res.all():

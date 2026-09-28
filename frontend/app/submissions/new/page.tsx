@@ -14,6 +14,7 @@ function NewSubInner({ preselectTeam }: { preselectTeam: string }) {
   const [busy, setBusy] = useState(false);
   const [noTeam, setNoTeam] = useState(false);
   const [eventsById, setEventsById] = useState<Record<string, any>>({});
+  const [ownedByTeam, setOwnedByTeam] = useState<Record<string, any>>({});
   const router = useRouter();
 
   const isOpen = (eventId: string) => {
@@ -30,16 +31,21 @@ function NewSubInner({ preselectTeam }: { preselectTeam: string }) {
       setTeams(list);
       if (!list.length) { setNoTeam(true); return; }
       try {
+        const mine = await api("/submissions").catch(() => ({ projects: [] }));
+        const owned: Record<string, any> = {};
+        for (const p of mine.projects || []) owned[p.team_id] = p;
+        setOwnedByTeam(owned);
         const ev = await api("/public/events");
         const map: Record<string, any> = {};
         for (const e of ev.events || []) map[e.id] = e;
         setEventsById(map);
         // Honor ?team= (Submit shortcut from the Events page) when it belongs
-        // to the user; otherwise default to the first team in an open event.
+        // to the user; otherwise default to the first team in an open event
+        // that does not already own a project (one submission per team).
         const firstOpen = list.find((x: any) => x.id === preselectTeam)
           || list.find((x: any) => {
             const c = map[x.event_id]?.submissions_close;
-            return !c || new Date(c).getTime() > Date.now();
+            return !owned[x.id] && (!c || new Date(c).getTime() > Date.now());
           }) || list[0];
         setF((s) => ({ ...s, team_id: firstOpen.id, event_id: firstOpen.event_id }));
         try { setTracks((await api(`/events/${firstOpen.event_id}/tracks`)).tracks?.filter((x: any) => x.is_active) || []); } catch {}
@@ -81,9 +87,13 @@ function NewSubInner({ preselectTeam }: { preselectTeam: string }) {
           <option value="">— pick a team —</option>
           {teams.map((t) => {
             const open = isOpen(t.event_id);
-            return <option key={t.id} value={t.id} disabled={!open}>{t.name}{open ? "" : " — submissions closed"}</option>;
+            const has = !!ownedByTeam[t.id];
+            return <option key={t.id} value={t.id} disabled={!open || has}>{t.name}{has ? " — already has a project" : open ? "" : " — submissions closed"}</option>;
           })}
         </select>
+        {ownedByTeam[f.team_id] && (
+          <div className="deadline-bar" style={{ marginBottom: 14 }}><I.doc /> This team already has “{ownedByTeam[f.team_id].title}” — one submission per team. <a href={`/submissions/${ownedByTeam[f.team_id].id}/edit`}>Open it instead</a>.</div>
+        )}
         {f.event_id && !isOpen(f.event_id) && (
           <div className="deadline-bar" style={{ marginBottom: 14 }}><I.clock /> This team's event stopped accepting submissions. Join an open event and create a team there instead.</div>
         )}
@@ -99,7 +109,7 @@ function NewSubInner({ preselectTeam }: { preselectTeam: string }) {
         <label>Repository URL</label><input value={f.repo_url} onChange={(e) => setF({ ...f, repo_url: e.target.value })} placeholder="https://…" inputMode="url" />
         <CustomAnswers eventId={f.event_id} value={custom} onChange={setCustom} />
         {msg && <div className="form-error">{msg}</div>}
-        <button className="btn" type="submit" disabled={busy}>{busy ? "Saving…" : <>Save draft <I.arrow /></>}</button>
+        <button className="btn" type="submit" disabled={busy || !!ownedByTeam[f.team_id]}>{busy ? "Saving…" : <>Save draft <I.arrow /></>}</button>
       </form>
     </div>
   );

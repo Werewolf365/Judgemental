@@ -9,6 +9,7 @@ connectivity gate, calculation, reproducibility, historical priors, CSV.
 Like check_t1.py it leaves its draft probe events behind (invisible
 publicly) rather than deleting data it cannot see. Prints PASS/FAIL.
 """
+import http.cookiejar
 import json
 import os
 import time
@@ -71,17 +72,64 @@ TRK = b["track"]["id"] if s == 200 else None
 REG = {"fullName": "T2", "email": "t2@local.test", "phone": "9999999999",
        "age": 20, "degree": "B.Tech", "yearOfStudy": "3rd Year",
        "institution": "T2 U", "category": "Open Innovation"}
-req(f"/events/{EV}/join", P, "POST", REG)
-s, b = J(f"/events/{EV}/teams", P, "POST", {"name": "T2 Team"})
-TEAM = b["team"]["id"] if s == 200 else None
 
+
+def _login(email):
+    cj = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+    r = urllib.request.Request(
+        BASE + "/auth/login",
+        data=json.dumps({"email": email, "password": "ProbePass123"}).encode(),
+        headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        opener.open(r, timeout=30)
+    except Exception:
+        return None
+    tok = [c.value for c in cj if c.name == "session"]
+    return f"Cookie: session={tok[0]}" if tok else None
+
+
+def mkuser(email, name):
+    """Register + log in a throwaway user, returning its Cookie header.
+    One submission per team (and one team per user per event) means the
+    four ranked projects need four separate users. Registration is
+    idempotent across runs: an existing account just logs in."""
+    s, _ = J("/auth/register", None, "POST",
+             {"email": email, "password": "ProbePass123", "display_name": name})
+    if s != 200 and s != 409:
+        return None
+    return _login(email)
+
+
+def join_team_project(header, email, ev, trk, team_name, title, summary="probe"):
+    """Join event, create a team, draft one project. Returns project id."""
+    reg = dict(REG, email=email, fullName=email.split("@")[0])
+    req(f"/events/{ev}/join", header, "POST", reg)
+    s, b = J(f"/events/{ev}/teams", header, "POST", {"name": team_name})
+    team = b["team"]["id"] if s == 200 else None
+    s, b = J("/submissions", header, "POST", {"team_id": team, "event_id": ev,
+                                              "track_id": trk, "title": title,
+                                              "summary": summary})
+    return b["project"]["id"] if s == 200 else None
+
+
+# One submission per team: four projects need four users (P + three probes).
+MEMBERS = [(P, "participant@local.test")] + [
+    (mkuser(f"t2probe{i}@local.test", f"T2 Probe {i}"), f"t2probe{i}@local.test")
+    for i in (2, 3, 4)]
+check("probe users ready", all(h for h, _ in MEMBERS), f"{MEMBERS}")
 PROJS = []
-for i in range(1, 5):
-    s, b = J("/submissions", P, "POST", {"team_id": TEAM, "event_id": EV,
-                                         "track_id": TRK, "title": f"T2 P{i}",
-                                         "summary": "probe"})
-    PROJS.append(b["project"]["id"] if s == 200 else None)
-check("four draft projects created", all(PROJS), f"{PROJS}")
+OWNERS = []
+for (header, email), i in zip(MEMBERS, range(1, 5)):
+    PROJS.append(join_team_project(header, email, EV, TRK, f"T2 Team {i}", f"T2 P{i}"))
+    OWNERS.append(header)
+check("four draft projects created (one per team)", all(PROJS), f"{PROJS}")
+_, mine_teams = J("/teams", P)
+OWN_TEAM = next((t["id"] for t in mine_teams.get("teams", []) if t["event_id"] == EV), None)
+s, b = J("/submissions", P, "POST", {"team_id": OWN_TEAM, "event_id": EV,
+                                     "track_id": TRK, "title": "T2 P5",
+                                     "summary": "probe"})
+check("second project for the same team refused (409)", s == 409, f"got {s} {b}")
 
 # ---- rubrics ----
 s, b = J(f"/events/{EV}/rubric", O, "POST", {"name": "Craft", "description": "d"})
@@ -117,8 +165,8 @@ s, b = J(f"/events/{EV}/judging", O, "PATCH",
 check("batch mode configured (per_project=1, rolling off)", s == 200, f"got {s} {b}")
 
 # ---- rolling OFF: submits create nothing ----
-for pid in PROJS:
-    req(f"/submissions/{pid}/submit", P, "POST", {})
+for pid, owner in zip(PROJS, OWNERS):
+    req(f"/submissions/{pid}/submit", owner, "POST", {})
 s, b = J(f"/events/{EV}/judges", O)
 loads = {j["user_id"]: j["active_load"] for j in b["judges"]}
 check("no rolling assignment while off", sum(loads.values()) == 0, f"{loads}")
@@ -229,15 +277,14 @@ J(f"/events/{EV2}/rubric", O, "POST", {"name": "Craft"})
 J(f"/events/{EV2}/rubric", O, "POST", {"name": "Scope"})
 C3 = {c["name"]: c["id"] for c in J(f"/events/{EV2}/rubric", O)[1]["criteria"]}
 J(f"/events/{EV2}/judges", O, "POST", {"email": me_a["user"]["email"]})
-req(f"/events/{EV2}/join", P, "POST", REG)
-s, b = J(f"/events/{EV2}/teams", P, "POST", {"name": "T2 Hist Team"})
-TEAM2 = b["team"]["id"] if s == 200 else None
+# One submission per team here too: H1 and H2 live on separate teams.
+H1U, H2U = MEMBERS[0], MEMBERS[1]
 PIDS = []
-for i in (1, 2):
-    s, b = J("/submissions", P, "POST", {"team_id": TEAM2, "event_id": EV2,
-                                         "track_id": TRK2, "title": f"H{i}", "summary": "h"})
-    PIDS.append(b["project"]["id"] if s == 200 else None)
-    req(f"/submissions/{PIDS[-1]}/submit", P, "POST", {})
+for (header, email), title in zip((H1U, H2U), ("H1", "H2")):
+    pid = join_team_project(header, email, EV2, TRK2, f"T2 Hist Team {title}", title, summary="h")
+    PIDS.append(pid)
+    if pid:
+        req(f"/submissions/{pid}/submit", header, "POST", {})
 J(f"/events/{EV2}/assignments/batch", O, "POST", {})
 _, mine = J("/judge/assignments", JA)
 mine = [a for a in mine["assignments"] if a["event_id"] == EV2]

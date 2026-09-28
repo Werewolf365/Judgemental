@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, fetchMe } from "@/lib/api";
 import { I } from "@/components/art";
+import Popup from "@/components/Popup";
 
 /** Client mirror of the server's resolve_weights (service.py): equal split
  *  when no criterion carries a weight, normalized shares otherwise, and no
@@ -33,6 +34,9 @@ export default function ScoreProject({ params }: { params: { id: string } }) {
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [denied, setDenied] = useState(false);
+  const [hasDraft, setHasDraft] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -46,10 +50,13 @@ export default function ScoreProject({ params }: { params: { id: string } }) {
           for (const [k, v] of Object.entries(ev.scores || {})) init[k] = String(v);
           setScores(init);
           setComment(ev.comment || "");
+          setHasDraft(true);
         }
       } catch (e: any) { setDenied(true); setMsg(e.message); }
     })();
   }, [params.id]);
+
+  function markDirty() { setDirty(true); }
 
   if (denied) return <div className="card empty" style={{ maxWidth: 560, margin: "40px auto" }}>
     <h1>Not available</h1><p>{msg}</p><Link href="/judge" className="btn">Back to assignments</Link></div>;
@@ -76,6 +83,8 @@ export default function ScoreProject({ params }: { params: { id: string } }) {
       const d = await api(`/judge/assignments/${params.id}/scores`,
         { method: "POST", body: JSON.stringify({ scores: payload, comment }) });
       setMsg("Draft saved — only you can see it until you submit.");
+      setHasDraft(true);
+      setDirty(false);
       const fresh = await api(`/judge/assignments/${params.id}`);
       setData(fresh.assignment);
       void d;
@@ -84,11 +93,11 @@ export default function ScoreProject({ params }: { params: { id: string } }) {
   }
 
   async function submit() {
-    if (!confirm("Submit these scores? They become final and feed the event ranking.")) return;
-    setBusy(true); setMsg("");
+    setBusy(true); setMsg(""); setReviewOpen(false);
     try {
       const d = await api(`/judge/assignments/${params.id}/submit`, { method: "POST", body: "{}" });
       setMsg(`Submitted — weighted total ${Number(d.weighted_score).toFixed(2)}.`);
+      setDirty(false);
       setData((await api(`/judge/assignments/${params.id}`)).assignment);
     } catch (e: any) { setMsg(e.message); }
     finally { setBusy(false); }
@@ -116,13 +125,13 @@ export default function ScoreProject({ params }: { params: { id: string } }) {
             {c.description && <p className="form-note" style={{ marginTop: -4 }}>{c.description}</p>}
             <input id={`score-${c.id}`} type="number" min={0} max={10} step={0.5}
               value={scores[c.id] ?? ""} disabled={closed || busy}
-              onChange={(e) => setScores({ ...scores, [c.id]: e.target.value })}
+              onChange={(e) => { setScores({ ...scores, [c.id]: e.target.value }); markDirty(); }}
               placeholder="0 – 10" style={{ maxWidth: 200 }} />
           </div>
         ))}
         <label htmlFor="judge-comment">Comment <span style={{ fontWeight: 400 }}>(optional, visible to organizers)</span></label>
         <textarea id="judge-comment" value={comment} disabled={closed || busy}
-          onChange={(e) => setComment(e.target.value)} placeholder="What stood out, good or bad?" />
+          onChange={(e) => { setComment(e.target.value); markDirty(); }} placeholder="What stood out, good or bad?" />
         <div className="deadline-bar" style={{ marginBottom: 14 }}>
           <I.doc /> Weighted total: <b className="countdown">{total == null ? "—" : total.toFixed(2)}</b>
           {total == null && <span style={{ fontWeight: 400 }}>the rubric is mid-edit — scores still save, totals resume once weights are complete</span>}
@@ -130,12 +139,37 @@ export default function ScoreProject({ params }: { params: { id: string } }) {
         </div>
         {msg && <p>{msg}</p>}
         {!closed ? (
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button className="btn-ghost" onClick={save} disabled={busy}>Save draft</button>
-            <button className="btn" onClick={submit} disabled={busy}>Submit scores <I.arrow /></button>
-          </div>
+          <>
+            <p className="form-note" style={{ marginBottom: 10 }}>
+              {!hasDraft
+                ? "Step 1 — press “Save draft” first. Nothing is final until you review and submit."
+                : dirty
+                  ? "You have unsaved changes — save the draft again to review them."
+                  : missing > 0
+                    ? `Step 2 — ${missing} criterion${missing > 1 ? "s" : ""} still unscored. Score everything, save the draft, then review.`
+                    : "Step 2 — draft is complete. Review it, then submit."}
+            </p>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button className="btn-ghost" onClick={save} disabled={busy}>Save draft</button>
+              <button className="btn" onClick={() => setReviewOpen(true)} disabled={busy || !hasDraft || dirty || missing > 0}>Review & submit <I.arrow /></button>
+            </div>
+          </>
         ) : <p>{a.status === "COMPLETED" ? `Submitted${a.completed_at ? ` ${new Date(a.completed_at).toLocaleString()}` : ""} — final.` : "This assignment was revoked."}</p>}
       </div>
+      {reviewOpen && !closed && (
+        <Popup kind="info" title="Review your scores" dismissLabel="Back to editing" onClose={() => setReviewOpen(false)}>
+          <p style={{ color: "var(--muted)" }}>Once submitted, scores are final and feed the event ranking.</p>
+          {(a.rubric || []).map((c: any) => (
+            <div key={c.id} style={{ display: "flex", gap: 10, padding: "6px 0", borderTop: "1px solid var(--line)" }}>
+              <span>{c.name}{c.weight != null ? ` (${c.weight}%)` : ""}</span>
+              <b style={{ marginLeft: "auto" }}>{scores[c.id] ?? "—"}</b>
+            </div>
+          ))}
+          {comment.trim() && <p><b>Comment:</b> {comment}</p>}
+          <p>Weighted total: <b className="countdown">{total == null ? "—" : total.toFixed(2)}</b></p>
+          <button className="btn" onClick={submit} disabled={busy}>Final submit <I.arrow /></button>
+        </Popup>
+      )}
     </div>
   );
 }

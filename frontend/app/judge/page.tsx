@@ -9,7 +9,8 @@ const STATUS_TONE: Record<string, string> = {
   ASSIGNED: "badge-warn",
   IN_PROGRESS: "badge-track",
   COMPLETED: "badge-ok",
-  REVOKED: "badge-muted",
+  // NOTE: REVOKED never arrives here — the API excludes it, so a removed
+  // judge sees the empty state instead of dead rows.
 };
 
 export default function JudgeHome() {

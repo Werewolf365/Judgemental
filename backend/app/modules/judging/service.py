@@ -20,6 +20,31 @@ from app.shared.clock import utcnow
 from app.shared.errors import err
 
 
+# Criterion weights are percentages: the explicit total across ACTIVE
+# criteria may never exceed 100 at write time, and scoring requires it to
+# equal exactly 100 (all-NULL means equal shares instead). EPS absorbs float
+# dust like 0.1 + 0.2 so honest 100s are never rejected.
+WEIGHT_TARGET = 100.0
+WEIGHT_EPS = 1e-6
+
+
+def check_weight_cap(criteria: list, changed_id: str | None, new_weight) -> None:
+    """Write-time guard for POST/PATCH criterion.
+
+    Incremental building is allowed (20 → 65 → 100), but the edit is
+    refused when the resulting explicit total would overshoot 100 —
+    the organizer must spend the remainder or trim something else first.
+    """
+    others = sum(c.weight for c in criteria
+                 if c.is_active and c.weight is not None and c.id != changed_id)
+    total = others + (new_weight if new_weight is not None else 0)
+    if total > WEIGHT_TARGET + 1e-9:
+        remaining = max(0.0, WEIGHT_TARGET - others)
+        err(422, "validation_error",
+            f"That would push the rubric to {total:g}% — weights must total exactly 100% "
+            f"({remaining:g}% remaining). Lower this weight or trim another criterion first.")
+
+
 def _aware(x):
     if x is None:
         return None
@@ -83,7 +108,8 @@ async def rubric_locked(db: AsyncSession, event: Event) -> bool:
 def resolve_weights(criteria: list) -> dict:
     """Normalized {criterion_id: weight} over ACTIVE criteria.
 
-    All-NULL → equal weighting. All explicit → normalized to sum 1.
+    All-NULL → equal weighting. All explicit → must total exactly 100
+    (weights are percentages), normalized to sum 1 for the math.
     Mixed (some NULL, some set) → 422: the rubric is mid-edit and no score
     can be computed honestly under it. Empty → 422.
     """
@@ -98,8 +124,10 @@ def resolve_weights(criteria: list) -> dict:
             "or clear every weight to score with equal weighting")
     if not nully:
         total = sum(c.weight for c in active)
-        if total <= 0:
-            err(422, "validation_error", "Rubric weights must sum to more than zero")
+        if abs(total - WEIGHT_TARGET) > WEIGHT_EPS:
+            err(422, "validation_error",
+                f"Rubric weights total {total:g}% — they must sum to exactly 100% "
+                f"before anything can be scored. Adjust the weights in the console.")
         return {c.id: c.weight / total for c in active}
     return {c.id: 1.0 / len(active) for c in active}
 

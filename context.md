@@ -201,3 +201,43 @@ The platform revolves around the following core entities:
 - **`scripts/check_t2.py`** (37 checks, ALL PASS ×3 runs): full lifecycle on two fresh-per-run draft probes — rubric validation/lock matrix, roster guards, rolling-off proof, batch balance+idempotency, peer isolation, weighted-math equality, immutability, the connectivity-gate refusal (with no FAILED residue), cross-link recovery, deadline refusal, unanimous ranking with strictly decreasing thetas, recalculation replay identity, run history, CSV rows, equal-weight fallback live ((9,3)→6.0), second-event HISTORICAL prior. Rerun-safe via per-run slugs (T2 needs unevaluated projects; reuse is impossible, unlike check_t1's probe).
 - **Docs**: JUDGING.md rewritten (was "deferred"), judging README replaced, DATA-MODEL/ARCHITECTURE/README updated, suite documented in README. Full matrix green: run.py 7/7, check_t1 69/69, check_t2 37/37, unit 15/15, `tsc` clean.
 - **Rule for future work**: never assert on a doc's *numbers* without reproducing them — the crowd doc's own MAP magnitudes turned out to encode the removed weighting. Assert on evidence tables and orderings (exact), pin your own optimum (tight), and write down which is which.
+
+### 27. Auto-Assign Sweep — Scheduled Batch Assignment (done 2026-09-26)
+**Goal**: stop making the organizer press "Run batch assignment" by hand; cover submissions on a fixed cadence the manual button can never disturb.
+- **Backend** (new `judging/scheduler.py`, asyncio-only — no new dependencies, image build untouched): an in-process loop started/stopped by a lifespan handler in `main.py`. Each tick sleeps `AUTO_ASSIGN_EVERY_SECONDS` (default `180` = 3 min testing; set `1800` for the 30-min production cadence — env only, no code change; also explicit in `docker-compose.yml`), then runs one `assign_all_pending` pass per event that has SUBMITTED projects, each in its own session with per-event rollback. Ticks re-read env, skip (don't pile up) while a sweep is still running via an `asyncio.Lock`, and log-only (no audit spam — the manual button keeps the audit trail). Empty sweeps change nothing (idempotent by construction).
+- **Timer independence**: the button hits the same endpoint as before and shares no state with the loop — pressing it cannot shift, skip, or double a scheduled sweep; a manual batch racing a sweep converges via the existing FOR UPDATE + ON CONFLICT DO NOTHING guarantees.
+- **UI**: button untouched; the stale "rolling OFF means press the button" note now states the sweep cadence + last sweep (time, count created), rendered from the existing judging-status payload the panel already fetches — zero new requests, zero polling, no lag risk. Rolling-settings label corrected the same way. The batch endpoint docstring's "there is no scheduler" claim was false after this change, so it was rewritten.
+- **Rule for future work**: single worker assumed (stock uvicorn) — concurrent sweeps would stay *correct* but duplicate effort; revisit if workers are ever added.
+
+### 28. Rubric Weights Must Total 100 (done 2026-09-26)
+**Goal**: organizers could stack weights past 100 (e.g. 20+45+35+22=122) because scoring silently normalized. Weights are percentages now, enforced both ends.
+- **Write-time** (`service.check_weight_cap`, called by POST/PATCH criterion): the explicit total across ACTIVE criteria may never exceed 100 — incremental building (20 → 65 → 100) works, overshoot 422s naming the remaining capacity. NULLs contribute 0 (mid-edit mixed mode still storable); deactivation frees capacity.
+- **Scoring-time** (`resolve_weights`): an all-explicit rubric must total exactly 100 (±1e-6 float dust) or scoring/calculation 422s telling the organizer to fix it. All-NULL equal split unchanged.
+- **UI**: rubric tab shows running total + remaining (or an over-cap error for legacy rows), and add/edit pre-checks the cap client-side with the same message — server stays authoritative.
+- **Compatibility**: check_t2's 60/40 (=100) and all-NULL paths unaffected; unit tests never touch weights. Legacy rows already over 100 can no longer score until trimmed — intended.
+- **Verified live**: add 30 → 200, add 80 (→110) → 422, add 70 (→100) → 200, patch 30→40 (→110) → 422, patch 30→20 → 200; unit 15/15, check_t2 ALL PASS, run.py 7/7.
+
+### 29. Revoked Assignments Hidden From Judges (done 2026-09-26)
+**Goal**: after an organizer removed a judge, their dashboard still listed every revoked assignment with REVOKED badges — dead work the judge could also still open via a bookmarked URL.
+- **Backend** (`judging/judge.py`): `GET /judge/assignments` now excludes `REVOKED` rows outright, and `_own_assignment` answers 403 on revoked ids too (same no-oracle answer as missing/peer's, so detail/score/submit paths all refuse identically). COMPLETED work stays visible — only revoked work disappears, matching the "completed evaluations survive" rule.
+- **Frontend**: removed the now-unreachable `REVOKED` badge tone; the page's existing filters already ignore anything but ASSIGNED/IN_PROGRESS/COMPLETED, so a removed judge lands on the "No assignments yet" empty state with zero new requests.
+- **Rule for future work**: visibility of dead platform objects belongs server-side — the client must never be the thing hiding revoked/removed rows.
+
+### 30. One Submission Per Team (done 2026-09-26)
+**Goal**: teams were able to pile up multiple projects; exactly one project row may exist per team (deleted drafts free the slot).
+- **Backend** (`submissions/routes.py`): `POST /submissions` answers 409 when the team already owns a project. Seed/fixture legacy rows (e.g. tm_07's duplicate) are untouched — the rule is write-time only.
+- **Frontend**: project picker disables teams that already own one (with reason), auto-prefers a team without a project, and blocks save with an "open it instead" link; dashboard hides "New project" once every team owns one.
+- **Suite migration**: `check_t2.py` previously built 4-projects-on-1-team scaffolding, which is now illegal input — it registers throwaway users (`mkuser` + `join_team_project` helpers) so EV runs 4 users/teams and EV2 runs 2, titles and all downstream numbers unchanged, plus a new explicit "second project refused (409)" check.
+- **Verified**: check_t2 ALL PASS, run.py 7/7, unit 15/15.
+
+### 31. Guided Judge Submit — Draft, Review, Final (done 2026-09-26)
+**Goal**: judges must save a draft before submitting (already server-enforced), but the UI gave no guidance and submitted via `confirm()`.
+- **Frontend** (`/judge/score/[id]`): step guidance under the buttons (save draft → complete → review → submit); Submit stays disabled until a complete draft is saved with no unsaved edits; then it opens a review `Popup` (per-criterion scores, comment, weighted total) with the **Final submit** button inside. `confirm()` is gone.
+- **Backend untouched**: draft-required/complete/immutable semantics already held; check_t2's submit/409 paths re-verified green.
+
+### 32. Captain-Only Submit + Invite Crash Fix (done 2026-09-26)
+**Goal**: only the team captain may finalize a submission; also fixed an invite endpoint that 500'd for everyone.
+- **Backend** (`submissions/routes.py`): `POST /submissions/{id}/submit` answers 403 unless the caller holds CAPTAIN on the team. Draft create/edit/delete stay member-level (collaborative drafting, single submitter — the Devfolio pattern). All suite submitters are team creators (captains), so no suite changes needed.
+- **Backend** (`teams/routes.py`): `POST /teams/{id}/invites` crashed with `NameError: request` (T2 commit added an audit call without the `Request` param) — added the missing parameter. Invite flow works again.
+- **Frontend** (editor Publish card): fetches the team roster, shows Submit only to the captain, members see "Only your team captain can submit".
+- **Verified live**: member submit → 403, captain submit → 200; check_t2 ALL PASS, run.py 7/7, unit 15/15.

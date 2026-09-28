@@ -58,6 +58,8 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
     try {
       const body: any = { name: cName.trim(), description: cDesc.trim() || null, display_order: rubric.length };
       if (cWeight.trim() !== "") body.weight = Number(cWeight);
+      const stop = capCheck(null, body.weight ?? null);
+      if (stop) { setMsg(stop); return; }
       await api(`/events/${eventId}/rubric`, { method: "POST", body: JSON.stringify(body) });
       setCName(""); setCDesc(""); setCWeight("");
       await load();
@@ -72,6 +74,8 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
         display_order: editing.display_order ?? 0 };
       if (editing.weight === "" || editing.weight == null) body.weight = null;
       else body.weight = Number(editing.weight);
+      const stop = capCheck(editing.id, body.weight);
+      if (stop) { setMsg(stop); return; }
       await api(`/rubric/${editing.id}`, { method: "PATCH", body: JSON.stringify(body) });
       setEditing(null);
       await load();
@@ -144,6 +148,25 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
   const locked = !!status?.rubric_locked;
   const weights = rubric.filter((c) => c.is_active);
   const explicit = weights.filter((c) => c.weight != null);
+  const wTotal = explicit.reduce((s, c) => s + Number(c.weight), 0);
+  const wRemaining = Math.max(0, 100 - wTotal);
+  const wOver = wTotal > 100 + 1e-9;
+  const wShort = explicit.length === weights.length && weights.length > 0 && Math.abs(wTotal - 100) > 1e-6;
+  const fmtPct = (n: number) => String(Math.round(n * 100) / 100);
+  function capCheck(exceptId: string | null, w: number | null): string | null {
+    if (w == null) return null;
+    const others = weights.filter((c) => c.weight != null && c.id !== exceptId)
+      .reduce((s, c) => s + Number(c.weight), 0);
+    if (others + w > 100 + 1e-9) {
+      const rem = Math.max(0, 100 - others);
+      return `That would push the rubric past 100% (${fmtPct(rem)}% remaining) — lower it or trim another criterion first.`;
+    }
+    return null;
+  }
+  const autoSecs = status?.auto_assign?.every_seconds;
+  const autoCadence = autoSecs == null ? "" : autoSecs >= 60 ? `${Math.round(autoSecs / 60)} min` : `${autoSecs} s`;
+  const autoLast = status?.auto_assign?.last_run ? fmtDate(status.auto_assign.last_run) : null;
+  const autoCreated = status?.auto_assign?.last_created ?? 0;
 
   return (
     <div className="card field">
@@ -169,7 +192,10 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
           {weights.length > 0 && (explicit.length === 0 || explicit.length === weights.length) && (
             <p className="form-note">{explicit.length === 0
               ? "No explicit weights — every criterion counts equally."
-              : `Weighted ${explicit.map((c) => `${c.name} ${c.weight}%`).join(" · ")} (normalized at scoring).`}</p>)}
+              : <>Weighted {explicit.map((c) => `${c.name} ${c.weight}%`).join(" · ")} — total <b>{fmtPct(wTotal)}% of 100%</b>
+                {wShort ? ` (${fmtPct(wRemaining)}% still unassigned — scoring is blocked until the total is exactly 100%).` : " ✓"}</>}</p>)}
+          {wOver && (
+            <div className="form-error">Weights total {fmtPct(wTotal)}% — over the 100% cap. Scoring is blocked until the total is exactly 100%.</div>)}
           {rubric.map((c) => (
             <div key={c.id} style={{ padding: "10px 0", borderTop: "1px solid var(--line)" }}>
               {editing?.id === c.id ? (
@@ -222,8 +248,10 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
             <button type="button" className="btn-ghost" disabled={busy} onClick={batch} title="Assign every under-covered submitted project now (idempotent)">
               Run batch assignment</button>
           </form>
-          {!status?.config.rolling_judging && (
-            <p className="form-note">Rolling assignment is OFF — new submissions wait for you to press “Run batch assignment”.</p>)}
+          {!status?.config.rolling_judging && status?.auto_assign?.enabled === false && (
+            <p className="form-note">Rolling assignment is OFF and auto-assign is disabled — new submissions wait for you to press “Run batch assignment”.</p>)}
+          {status?.auto_assign?.enabled !== false && (
+            <p className="form-note">Auto-assign sweeps in the background{autoCadence ? ` every ${autoCadence}` : ""}{autoLast ? ` — last sweep ${autoLast} (${autoCreated} new)` : " — first sweep pending"}. “Run batch assignment” does the same pass right now without touching that schedule.</p>)}
           {judges.map((j: any) => (
             <div key={j.user_id} style={{ display: "flex", gap: 10, padding: "8px 0", borderTop: "1px solid var(--line)", alignItems: "center", flexWrap: "wrap" }}>
               <b>{j.display_name}</b><span style={{ color: "var(--muted)" }}>{j.email}</span>
@@ -250,7 +278,7 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
           <input type="number" min={1} max={10} value={sPer} onChange={(e) => setSPer(Number(e.target.value))} />
           <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14.5 }}>
             <input type="checkbox" checked={sRolling} onChange={(e) => setSRolling(e.target.checked)} style={{ width: "auto", margin: 0 }} />
-            Rolling assignment — assign each submission as it arrives (off = batch after the deadline)
+            Rolling assignment — assign each submission as it arrives (off = covered by the background sweep)
           </label>
           <div style={{ marginTop: 10 }}><button className="btn" disabled={busy} onClick={saveSettings}>Save judging settings</button></div>
         </div>
