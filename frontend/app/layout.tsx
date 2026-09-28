@@ -20,7 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <footer className="site-footer">
           <div className="footer-inner">
             <b style={{ color: "var(--sea-950)" }}>Dogfood</b>
-            <span>Self-hosted hackathon portal · T1 core · runs offline</span>
+            <span>Self-hosted hackathon portal · runs offline</span>
             <span style={{ marginLeft: "auto" }}>
               <a href="/events">Events</a> · Local-first
             </span>

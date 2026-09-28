@@ -2,6 +2,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api, fetchMe, fmtDate } from "@/lib/api";
+import { ZONES, wallToUTC, utcToWall } from "@/lib/tz";
 import { I } from "@/components/art";
 import DateTimePicker from "@/components/DateTimePicker";
 import JudgingPanel from "@/components/JudgingPanel";
@@ -42,10 +43,12 @@ function Console() {
   // create form
   const [name, setName] = useState("");
   const [close, setClose] = useState("");
+  const [tz, setTz] = useState("UTC");
   // details edit form
   const [eName, setEName] = useState("");
   const [eDesc, setEDesc] = useState("");
   const [eClose, setEClose] = useState("");
+  const [eTz, setETz] = useState("UTC");
   const [trackName, setTrackName] = useState("");
   const [prize, setPrize] = useState({ name: "", description: "", value_desc: "" });
   const [subs, setSubs] = useState<any[]>([]);
@@ -142,12 +145,15 @@ function Console() {
   }, [router]);
   useEffect(() => { if (sel) loadDetail(sel); }, [sel, events]);
 
-  // Keep the edit form in sync with the working event.
+  // Keep the edit form in sync with the working event (deadline shown as
+  // wall-clock in the event's own zone; saved back to UTC on submit).
   useEffect(() => {
     if (!detail?.event) return;
+    const z = detail.event.timezone || "UTC";
     setEName(detail.event.name || "");
     setEDesc(detail.event.description || "");
-    setEClose(detail.event.submissions_close ? detail.event.submissions_close.slice(0, 16) : "");
+    setETz(z);
+    setEClose(detail.event.submissions_close ? utcToWall(detail.event.submissions_close, z) : "");
   }, [detail?.event?.id]);
 
   async function loadReview(id: string) {
@@ -181,7 +187,7 @@ function Console() {
     setMsg("");
     if (!name.trim()) { setMsg("Give the event a name."); return; }
     try {
-      const d = await api("/events", { method: "POST", body: JSON.stringify({ name: name.trim(), submissions_close: close || new Date(Date.now() + 30 * 864e5).toISOString() }) });
+      const d = await api("/events", { method: "POST", body: JSON.stringify({ name: name.trim(), submissions_close: close ? wallToUTC(close, tz) : new Date(Date.now() + 30 * 864e5).toISOString(), timezone: tz }) });
       setName(""); setClose("");
       setMsg(`Draft “${d.event.name}” created — Step 1 of 7 done. Add tracks next.`);
       await loadEvents(d.event.id);
@@ -193,7 +199,7 @@ function Console() {
     if (!detail) return;
     setMsg("");
     try {
-      const d = await api(`/events/${detail.event.id}`, { method: "PATCH", body: JSON.stringify({ name: eName.trim(), description: eDesc, submissions_close: eClose || null }) });
+      const d = await api(`/events/${detail.event.id}`, { method: "PATCH", body: JSON.stringify({ name: eName.trim(), description: eDesc, submissions_close: eClose ? wallToUTC(eClose, eTz) : null, timezone: eTz }) });
       setMsg("Details saved.");
       await loadEvents(d.event.id);
       await loadDetail(d.event.id);
@@ -313,7 +319,7 @@ function Console() {
             <select value={sel} onChange={(e) => setSel(e.target.value)} style={{ marginBottom: 0 }}>
               {events.map((e) => <option key={e.id} value={e.id}>{e.name} ({e.status})</option>)}
             </select></div>
-          {slug && <a className="btn-ghost btn-sm" href={`/events/${slug}/projects`}>View gallery</a>}
+          {slug && ev?.status === "PUBLISHED" && <a className="btn-ghost btn-sm" href={`/events/${slug}/projects`}>View gallery</a>}
           <button className="btn-ghost btn-sm" onClick={() => { setSel(""); setStep("details"); setDetail(null); }}>+ New event</button>
         </div>
       </div>
@@ -323,9 +329,9 @@ function Console() {
         <div className="steps" aria-label="Setup progress">
           {STEPS.map((s) => (
             <button key={s.key} type="button" onClick={() => goStep(s.key)}
-              className={`step ${s.n < stepN || (s.key === "publish" && ev?.status === "PUBLISHED") ? "done" : s.n === stepN ? "now" : ""}`}
-              style={{ background: "none", borderLeft: 0, borderRight: 0, borderBottom: 0, cursor: "pointer", textAlign: "left", font: "inherit" }}>
-              <b><span className="n">{s.n < stepN ? "✓" : s.n}</span> {s.label}</b>
+              className={`step ${(s.key === "details" && !ev && name.trim() && close) || (ev && ev.status !== "PUBLISHED" && s.n < stepN) ? "done" : s.n === stepN ? "now" : ""}`}
+              style={{ cursor: "pointer", textAlign: "left", font: "inherit" }}>
+              <b>{s.label}</b>
               {s.key === "details" && ev ? ev.name : s.key === "tracks" && ev ? `${detail?.tracks?.length || 0} added` : s.key === "prizes" && ev ? `${detail?.prizes?.length || 0} added` : s.key === "form" && ev ? `${formFields.length} fields` : s.key === "gallery" && ev ? VIS_OPTIONS.find((o) => o.v === curVis)?.title : s.key === "publish" && ev ? ev.status : s.key === "voting" && voting ? (voting.voting_enabled ? `On · ${voting.voting_mode}` : "Off") : ""}
             </button>
           ))}
@@ -336,16 +342,24 @@ function Console() {
           <div>{!ev ? (
             <div style={{ maxWidth: 560 }}><h2>Step 1 — Name your event</h2>
               <label>Event name</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Spring Hack 2027" />
-              <label>Submissions close (UTC)</label><DateTimePicker value={close} onChange={setClose} placeholder="Pick deadline date & time" defaultToday />
-              <div style={{ display: "flex", gap: 10 }}>
+              <label>Deadline timezone</label>
+              <select value={tz} onChange={(e) => setTz(e.target.value)}>
+                {ZONES.map((z) => <option key={z} value={z}>{z === "UTC" ? "UTC (default)" : z}</option>)}
+              </select>
+              <label>Submissions close ({tz})</label><DateTimePicker value={close} onChange={setClose} placeholder="Pick deadline date & time" defaultToday />
+              <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
                 <button className="btn" onClick={create}>Create draft <I.arrow /></button>
               </div></div>
           ) : (
             <div style={{ maxWidth: 560 }}><h2>Step 1 — Event details</h2>
               <label>Event name</label><input value={eName} onChange={(e) => setEName(e.target.value)} />
               <label>Description</label><textarea value={eDesc} onChange={(e) => setEDesc(e.target.value)} placeholder="What is this hackathon about?" />
-              <label>Submissions close (UTC)</label><DateTimePicker value={eClose} onChange={setEClose} placeholder="Pick deadline date & time" defaultToday />
-              <div style={{ display: "flex", gap: 10 }}>
+              <label>Deadline timezone</label>
+              <select value={eTz} onChange={(e) => setETz(e.target.value)}>
+                {ZONES.map((z) => <option key={z} value={z}>{z === "UTC" ? "UTC (default)" : z}</option>)}
+              </select>
+              <label>Submissions close ({eTz})</label><DateTimePicker value={eClose} onChange={setEClose} placeholder="Pick deadline date & time" defaultToday />
+              <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
                 <button className="btn-ghost" onClick={saveDetails}>Save details</button>
                 <button className="btn" onClick={() => goStep("tracks")}>Continue to tracks <I.arrow /></button>
               </div></div>
@@ -359,8 +373,8 @@ function Console() {
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
               {(detail?.tracks || []).map((t: any) => <span key={t.id} className="badge badge-track">{t.name}</span>)}
             </div>
-            <div style={{ display: "flex", gap: 8 }}><input value={trackName} onChange={(e) => setTrackName(e.target.value)} placeholder="New track name" style={{ flex: 1 }} />
-              <button className="btn" onClick={addTrack}>Add track</button></div>
+            <form onSubmit={(e) => { e.preventDefault(); addTrack(); }} style={{ display: "flex", gap: 8 }}><input value={trackName} onChange={(e) => setTrackName(e.target.value)} placeholder="New track name" style={{ flex: 1 }} />
+              <button className="btn" type="submit">Add track</button></form>
             <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
               <button className="btn-ghost" onClick={() => goStep("details")}><I.back /> Back</button>
               <button className="btn" onClick={() => goStep("prizes")}>Continue to prizes <I.arrow /></button>
@@ -468,7 +482,7 @@ function Console() {
           <><h2>Step 6 — Review & publish</h2>
             <p>Status: <span className={`badge ${ev.status === "PUBLISHED" ? "badge-ok" : "badge-muted"}`}>{ev.status}</span></p>
             <dl className="kv">
-              <dt>Details</dt><dd>{ev.name} · closes {fmtDate(ev.submissions_close)}</dd>
+              <dt>Details</dt><dd>{ev.name} · closes {fmtDate(ev.submissions_close)} ({ev.timezone || "UTC"})</dd>
               <dt>Tracks</dt><dd>{detail?.tracks?.length || 0}</dd>
               <dt>Prizes</dt><dd>{detail?.prizes?.length || 0}</dd>
               <dt>Gallery</dt><dd>{VIS_OPTIONS.find((o) => o.v === curVis)?.title} — {VIS_OPTIONS.find((o) => o.v === curVis)?.desc}</dd>
@@ -477,7 +491,7 @@ function Console() {
               <button className="btn" onClick={() => publish(false)}>Publish event <I.arrow /></button>
               <button className="btn-ghost" onClick={() => publish(true)}>Unpublish</button>
               <a className="btn-ghost btn-sm" href={`/events/${ev.slug || ev.id}`}>Preview event page</a>
-              <a className="btn-ghost btn-sm" href={`/events/${ev.slug || ev.id}/projects`}>View gallery</a>
+              {ev.status === "PUBLISHED" && <a className="btn-ghost btn-sm" href={`/events/${ev.slug || ev.id}/projects`}>View gallery</a>}
             </div>
             <div style={{ marginTop: 14 }}>
               <button className="btn-ghost btn-sm" onClick={() => goStep("gallery")}><I.back /> Back to gallery access</button>{" "}
@@ -550,8 +564,9 @@ function Console() {
       {/* Judging console */}
       {ev && <JudgingPanel eventId={ev.id} />}
 
-      {/* Activity review */}
-      {ev && (
+      {/* Activity review — submissions, participants and organizers only exist
+        meaningfully once the event is published; drafts show nothing here. */}
+      {ev && ev.status === "PUBLISHED" && (
         <div className="card field">
           <div className="tabs">
             <button className={reviewTab === "submissions" ? "on" : ""} onClick={() => { setReviewTab("submissions"); loadReview(ev.id); }}>Submissions ({subs.length})</button>

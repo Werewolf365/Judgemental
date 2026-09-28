@@ -24,6 +24,7 @@ Assignment is a constrained optimization over three goals, in this priority:
    one elsewhere) until connected or no improving swap exists. Coverage-1
    projects can never link — that case stays the calculate gate's refusal,
    reported honestly by health instead of papered over.
+    Redundancy - pairs sharing exactly one judge rest on one verdict alone, so later fill slots prefer completing such pairs to 2 shared (after load and bridging), the batch pass upgrades them where a verified swap exists, and health reports the remaining weak-pair count with min_bridge. Full pairwise redundancy is unachievable at uniform coverage 2 without destroying balance (it would force all projects onto one judge pair), so redundancy is opportunistic; jpp 3+ is where it has room to work.
 
 Concurrency: callers run inside a transaction; assign_* takes a
 SELECT … FOR UPDATE lock on the event row first, serializing assignment
@@ -102,13 +103,17 @@ def _rank_candidates(loads: dict, live: dict, eligible_ids: set, exclude_ids: se
 def _slot_ranking(state: dict, project_id: str, picked: list) -> list:
     """Pure per-slot pick order. First slot attaches (same as
     _rank_candidates); later slots BRIDGE — preferring candidates that serve
-    components not yet represented among this project's picks. Load stays
-    primary throughout, so bridging only ever acts among load ties: balance
-    first, linkage second. With one slot the key collapses exactly to
-    _rank_candidates, keeping single-slot fills byte-identical in behavior.
+    components not yet represented among this project's picks — then REDUND
+    (complete thin bridges): prefer candidates that lift an exactly-1-shared
+    pair involving this project to 2 shared judges. Load stays primary
+    throughout, so linkage only ever acts among load ties: balance first,
+    new components second, redundancy third. With one slot the key collapses
+    exactly to _rank_candidates, keeping single-slot fills byte-identical
+    in behavior.
     """
     live, loads = state["live"], state["loads"]
-    exclude = set(state["coverage"].get(project_id, ())) | set(picked)
+    coverage = state["coverage"]
+    exclude = set(coverage.get(project_id, ())) | set(picked)
     if not picked:
         return _rank_candidates(loads, live, state["eligible_ids"], exclude)
     comp_of = {}
@@ -116,11 +121,29 @@ def _slot_ranking(state: dict, project_id: str, picked: list) -> list:
         for p in comp:
             comp_of[p] = idx
     picked_comps = {comp_of[p] for q in picked for p in live.get(q, ()) if p in comp_of}
+    have_now = set(coverage.get(project_id, ())) | set(picked)
+
+    def redundancy_gain(uid):
+        """Projects q (≠ this one) with which this project currently shares
+        exactly one judge, and uid serves q: adding uid completes the pair
+        to a redundant (≥2 shared) bridge."""
+        gain = 0
+        served = live.get(uid, ())
+        if project_id in served:
+            return 0
+        for q, judges_q in coverage.items():
+            if q == project_id or q not in live.get(uid, ()):
+                continue
+            shared_now = len(set(judges_q) & have_now)
+            if shared_now == 1 and uid not in have_now:
+                gain += 1
+        return gain
 
     def key(uid):
         served = live.get(uid, ())
         new = {comp_of[p] for p in served if p in comp_of} - picked_comps
-        return (loads.get(uid, 0), -len(new), -len(served), uid)
+        return (loads.get(uid, 0), -len(new), -redundancy_gain(uid),
+                -len(served), uid)
 
     return sorted((uid for uid in state["eligible_ids"] if uid not in exclude), key=key)
 
@@ -136,6 +159,44 @@ def _fill_project_slots(state: dict, project_id: str, need: int) -> list:
         picked.append(ranked[0])
         _apply_pick(state, project_id, [ranked[0]])
     return picked
+
+
+def shared_judge_count(coverage: dict, p1: str, p2: str) -> int:
+    """Pure: number of judges serving both projects (|judges(p1) ∩ judges(p2)|)."""
+    return len(coverage.get(p1, set()) & coverage.get(p2, set()))
+
+
+def single_shared_pairs(coverage: dict) -> list:
+    """Pure: sorted [(p1, p2)] over project pairs sharing exactly one judge.
+
+    These are the thin bridges — one departure (or one noisy judge) from a
+    flat likelihood direction. The strengthen pass targets exactly these.
+    """
+    pids = sorted(coverage.keys())
+    out = []
+    for i, p1 in enumerate(pids):
+        for p2 in pids[i + 1:]:
+            if shared_judge_count(coverage, p1, p2) == 1:
+                out.append((p1, p2))
+    return out
+
+
+def min_bridge(coverage: dict) -> int | None:
+    """Pure: minimum shared-judge count over directly-linked project pairs.
+
+    None when no pair shares a judge at all. The batch response reports this
+    so organizers can see bridge redundancy, not just connectivity.
+    """
+    pids = sorted(coverage.keys())
+    best = None
+    for i, p1 in enumerate(pids):
+        for p2 in pids[i + 1:]:
+            shared = shared_judge_count(coverage, p1, p2)
+            if shared == 0:
+                continue
+            if best is None or shared < best:
+                best = shared
+    return best
 
 
 def components_of(live: dict) -> list:
@@ -357,13 +418,116 @@ async def _merge_one(db: AsyncSession, event_id: str, state: dict,
             "to_judge": to_judge}
 
 
+async def _strengthen_bridges(db: AsyncSession, event_id: str, state: dict) -> list:
+    """Upgrade single-shared-judge bridges into redundant ones, where safe.
+
+    A pair sharing exactly one judge is ordered on that judge's verdicts
+    alone — thin evidence the model may get wrong. Each swap revokes one
+    movable (never COMPLETED) row and creates its replacement, keeping every
+    project's coverage count identical: for a pair (a, b) sharing only judge
+    s, some other judge t serving b is added to a in place of a donor d
+    (d != s, so the existing bridge is never the thing removed). Donors with
+    no saved evaluation are preferred (revoking those orphans nothing), then
+    lowest resulting workload spread — same scoring as repair. Each candidate
+    swap is verified on a scratch copy: the weak-pair count must strictly
+    decrease and the component count must not grow; otherwise skip (never
+    thrash). Bounded like repair; coverage-1 pairs have no donor distinct
+    from the shared judge and stay unstrengthenable. Full pairwise redundancy
+    is not always reachable — at uniform coverage 2 it conflicts with balance
+    (all pairs ≥2-shared would mean all projects share one judge pair), so
+    this pass takes verified improvements and reports the rest.
+    """
+    res = await db.execute(select(Evaluation.assignment_id).where(
+        Evaluation.event_id == event_id))
+    with_eval = set(r[0] for r in res.all())
+    res = await db.execute(select(JudgeAssignment).where(
+        JudgeAssignment.event_id == event_id,
+        JudgeAssignment.status != AssignmentStatus.REVOKED))
+    by_pid = {}
+    for r in res.scalars().all():
+        by_pid.setdefault(r.project_id, []).append(r)
+    base = {j: len(state["live"].get(j, ())) for j in state["eligible_ids"]}
+    strengthened = []
+    for _ in range(max(1, len(state["eligible_ids"]) + 1)):
+        weak = single_shared_pairs(state["coverage"])
+        if not weak:
+            break
+        n_weak_before = len(weak)
+        n_comps_before = len(components_of(state["live"]))
+        options = []
+        for a, b in weak:
+            shared = state["coverage"][a] & state["coverage"][b]
+            members_a = by_pid.get(a, [])
+            if len(members_a) < 2:
+                continue  # nothing movable without breaking coverage
+            movable = [r for r in members_a
+                       if (r.status.value if hasattr(r.status, "value") else str(r.status)) != "COMPLETED"
+                       and r.judge_user_id not in shared]
+            if not movable:
+                continue
+            on_a = {r.judge_user_id for r in members_a}
+            # Recipients serve b but not a; the shared judge is already on a.
+            recipients = [j for j in state["coverage"].get(b, set())
+                          if j in state["eligible_ids"] and j not in on_a]
+            if not recipients:
+                continue
+            for r in movable:
+                d = r.judge_user_id
+                for t in recipients:
+                    sim_min = sim_max = None
+                    for j, k in base.items():
+                        v = k - (j == d) + (j == t)
+                        sim_min = v if sim_min is None or v < sim_min else sim_min
+                        sim_max = v if sim_max is None or v > sim_max else sim_max
+                    options.append((sim_max - sim_min, r.id in with_eval,
+                                    a, b, r.id, t, r))
+        options.sort()
+        done = None
+        for _, _, a, b, _, to_judge, donor in options:
+            trial_cov = {p: set(js) for p, js in state["coverage"].items()}
+            trial_cov[a].discard(donor.judge_user_id)
+            trial_cov[a].add(to_judge)
+            trial_live = {j: set(ps) for j, ps in state["live"].items()}
+            trial_live[donor.judge_user_id].discard(a)
+            trial_live.setdefault(to_judge, set()).add(a)
+            trial_live = {j: ps for j, ps in trial_live.items() if ps}
+            if shared_judge_count(trial_cov, a, b) < 2:
+                continue
+            if len(single_shared_pairs(trial_cov)) >= n_weak_before:
+                continue
+            if len(components_of(trial_live)) > n_comps_before:
+                continue
+            done = (a, b, to_judge, donor)
+            break
+        if done is None:
+            break
+        a, b, to_judge, donor = done
+        donor.status = AssignmentStatus.REVOKED
+        await db.flush()
+        await _insert_slots(db, event_id, a, [to_judge])
+        state["live"][donor.judge_user_id].discard(a)
+        state["live"].setdefault(to_judge, set()).add(a)
+        state["coverage"].setdefault(a, set()).discard(donor.judge_user_id)
+        state["coverage"][a].add(to_judge)
+        state["loads"][donor.judge_user_id] = state["loads"].get(donor.judge_user_id, 0) - 1
+        state["loads"][to_judge] = state["loads"].get(to_judge, 0) + 1
+        # by_pid donor row is now REVOKED; drop it so later iterations in this
+        # pass never pick it as a donor again.
+        by_pid[a] = [r for r in by_pid.get(a, []) if r.id != donor.id]
+        strengthened.append({"project_id": a, "linked_project": b,
+                             "from_judge": donor.judge_user_id,
+                             "to_judge": to_judge})
+    return strengthened
+
+
 async def assign_all_pending(db: AsyncSession, event_id: str) -> dict:
     """Batch mode: fill every under-covered SUBMITTED project, then verify
-    connectivity and repair by rewiring where possible.
+    connectivity, repair by rewiring where possible, and strengthen thin
+    (single-shared-judge) bridges into redundant ones.
 
     Idempotent: a second run finds no slots and (if connected) no repairs.
-    Post-close the fill finds nothing (per-project gate) and repair is
-    skipped — swaps move work, which the deadline forbids.
+    Post-close the fill finds nothing (per-project gate) and repair/strengthen
+    are skipped — swaps move work, which the deadline forbids.
     """
     event = await _lock_event(db, event_id)
     state = await _load_state(db, event, with_projects=True)
@@ -377,17 +541,21 @@ async def assign_all_pending(db: AsyncSession, event_id: str) -> dict:
             continue
         created += await _insert_slots(db, event.id, pid, picked)
         touched.add(pid)
-    repairs = []
+    repairs, strengthened = [], []
     if await _svc.judging_stage(db, event) not in ("CLOSED", "RESULTS_READY"):
         repairs = await _repair_connectivity(db, event.id, state)
         # Repair inserts are replacements, not new coverage (each revokes one
         # row and creates one), so they stay out of assignments_created and
         # are reported separately — otherwise the count overstates progress.
         touched.update(r["project_id"] for r in repairs)
+        strengthened = await _strengthen_bridges(db, event.id, state)
+        touched.update(r["project_id"] for r in strengthened)
     comps = components_of(state["live"])
     return {"projects_touched": len(touched), "assignments_created": created,
             "connected": len(comps) <= 1, "components": len(comps),
-            "repairs": repairs}
+            "repairs": repairs, "strengthened": strengthened,
+            "min_bridge": min_bridge(state["coverage"]),
+            "weak_bridges": len(single_shared_pairs(state["coverage"]))}
 
 
 async def assign_judge_to_project(db: AsyncSession, event_id: str,
@@ -569,8 +737,8 @@ async def assignment_health(db: AsyncSession, event_id: str) -> dict:
             ex_titles = f" (e.g. {t1!r} ↔ {t2!r})"
         checklist.append({"key": "bridge_strength", "level": "warn",
                           "detail": f"{n_weak_bridges} project pair(s) share only 1 judge{ex_titles}. "
-                                    f"Single-judge bridges produce near-flat BT likelihood directions "
-                                    f"— the model may reverse these pairs. Raise judges-per-project "
+                                    f"Comparisons between them rest on a single judge's verdicts, "
+                                    f"so the model may misorder these pairs. Raise judges-per-project "
                                     f"to ≥3 and re-run batch assignment."})
     return {
         "judges": len(eligible_ids),

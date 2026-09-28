@@ -34,7 +34,7 @@ reliability — not score range — decides how strongly a preference pattern
 counts. Strictness and leniency are offsets the pairwise conversion removes,
 not signals about trustworthiness.
 
-## Model version: `crowd-bt-map-v2`
+## Model version: `crowd-bt-map-v3`
 
 The current fitter in `crowd_bt.py` (migration `0013`) adds three properties
 over the original v1:
@@ -55,23 +55,37 @@ tractable where it previously timed out.
 ### Sum-to-zero normalization (#3)
 After the MAP solve, `mean(all θ_i)` (including the reference at 0) is
 subtracted from every θ. The BT likelihood depends only on differences, so
-this is mathematically equivalent. Benefits:
+reported rankings are unchanged by the shift. Benefits and limits:
 - Thetas are symmetric around 0 regardless of which project is lex-smallest.
 - Values are comparable across recalculations (origin is no longer the
   arbitrary lex-smallest project).
 - The reference project is no longer pinned at 0 in the output; it ranks
   wherever its quality places it.
+- Limit: the shift symmetrizes *reporting* only. The fitted optimum still
+  depends on reference choice through the prior — on thin-bridge data,
+  identical comparisons rank differently under different references. Do not
+  claim the fit itself is reference-invariant.
 
 ### Laplace uncertainty (#2)
 BFGS already computes an approximate inverse Hessian (`res.hess_inv`).
-Its diagonal gives `Var(θ_i)` under the Laplace approximation. The fitter
-returns `theta_stds: {project_id: float}` alongside thetas.
+The fitter takes its full theta-block covariance and propagates it through
+the centering shift (`Var(θ′_i) = S_ii + Var(m) − 2·Cov(θ_i, m)` with
+`m` the subtracted mean), so every project — reference included — gets an
+honest marginal std. A diagonal-only read would miss the shift terms for all
+projects and leave the reference at exactly 0, understating every pairwise
+probability involving it. The fitter returns `theta_stds: {project_id: float}`
+alongside thetas.
 
 `rank()` uses these to annotate every adjacent pair:
 
 ```
 P(A > B) = σ( (θ_A − θ_B) / √(σ²_A + σ²_B) )
 ```
+
+Stated assumption: the two strengths are treated as independent Gaussians.
+The posterior does not factor that way (shared reference pin and centering
+shift induce covariance, which is dropped). Probabilities are therefore a
+flagging heuristic, not calibrated odds.
 
 Pairs where `P < 0.90` are flagged `close_call_with_next: true` and the
 projects involved receive `confidence: "Low"`. All other ranks get
@@ -112,8 +126,11 @@ coverage); calculation only after close; recalculation appends a new run
 version, never mutates. The rubric locks once judging starts; post-start
 removal deactivates instead of deleting.
 
-## Assignment
+## Rubric scales
 
+Each criterion declares the scale judges score against (`score_lo`/`score_hi`, default 0-10, enforced `hi > lo` at write time and by a CHECK constraint). Judge input validates into the declared range per criterion; the submitted weighted snapshot normalizes each score by its own scale first, so mixed-scale rubrics stay comparable. With default scales the snapshot reduces exactly to the old sum-of-products, and all existing snapshots are unaffected. The Bayesian scorer receives the same per-criterion scales. Scales are set in the console rubric builder (blank = 0-10) and exposed in every rubric payload.
+
+## Assignment
 Lowest-active-load first, `user_id` tie-break, in-memory load updates per
 slot (no stale snapshots), event-row locking plus a partial unique index
 with a matching `ON CONFLICT` arbiter for idempotent retries. Rebalance
@@ -127,10 +144,16 @@ calculate-time is the second gate.
 
 The `GET /events/{id}/assignments/health` checklist now includes
 `bridge_strength`: for every pair of directly-connected projects (sharing ≥1
-judge) it counts shared judges and warns when any pair shares only 1. A
-single-judge bridge produces a near-flat BT likelihood direction — the model
-may reverse those pairs. Recommendation is to raise `judges_per_project` to
-≥3.
+judge) it counts shared judges and warns when any pair shares only 1.
+Comparisons across a single-shared pair rest on one judge's verdicts alone,
+so the model may misorder those pairs (the truly flat directions are pairs
+with no shared judge at all — those stay the connectivity gate's refusal).
+Recommendation is to raise `judges_per_project` to ≥3. The batch pass
+upgrades single-shared pairs to 2-shared where a coverage-neutral verified
+swap exists (reported as `strengthened`, with `min_bridge`/`weak_bridges`
+counts); full pairwise redundancy is unachievable at uniform coverage 2
+without destroying balance, so the pass takes safe improvements and reports
+the rest rather than forcing them.
 
 Manual assignment (`POST /events/{id}/assignments/manual {project_id,
 judge_user_id}`) names one eligible roster judge for one submitted project:
@@ -158,7 +181,7 @@ no variance, stated in code rather than faked).
 |-------|------|---------|
 | `theta` | float | Sum-to-zero normalized BT strength |
 | `theta_std` | float \| null | Laplace std (null on pre-v2 legacy runs) |
-| `confidence` | `"High"` \| `"Low"` | `"Low"` when P(beats adjacent rank) < 90% |
+| `confidence` | `"High"` \| `"Low"` \| null | `"Low"` when P(beats adjacent rank) < 90%; null means uncertainty was never computed (pre-0013 legacy rows), not confidence |
 | `rank` | int | Competition rank (1224 style) |
 
 Run envelope includes:

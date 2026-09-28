@@ -8,6 +8,8 @@ import { I } from "@/components/art";
 export function AuthForm({ mode }: { mode: "login" | "register" }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [showPw, setShowPw] = useState(false);
   const [name, setName] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
@@ -17,6 +19,7 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
     e.preventDefault(); setErr("");
     if (!email.includes("@")) { setErr("Enter a valid email address."); return; }
     if (password.length < 8) { setErr("Password must be at least 8 characters."); return; }
+    if (mode === "register" && password !== confirm) { setErr("Passwords do not match."); return; }
     setBusy(true);
     try {
       if (mode === "login") await api("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
@@ -48,7 +51,17 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
         <label htmlFor="email">Email</label>
         <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@team.org" autoComplete="email" />
         <label htmlFor="pw">Password</label>
-        <input id="pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Minimum 8 characters" autoComplete={mode === "login" ? "current-password" : "new-password"} />
+        <div style={{ display: "grid", marginBottom: 14 }}>
+          <input id="pw" type={showPw ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Minimum 8 characters" autoComplete={mode === "login" ? "current-password" : "new-password"} style={{ gridArea: "1/1", paddingRight: 40, marginBottom: 0 }} />
+          <button type="button" className="link-btn" onClick={() => setShowPw((s) => !s)} aria-label={showPw ? "Hide password" : "Show password"} title={showPw ? "Hide password" : "Show password"}
+            style={{ gridArea: "1/1", justifySelf: "end", alignSelf: "center", marginRight: 10, fontSize: 16, textDecoration: "none", opacity: .7 }}>👁</button>
+        </div>
+        {mode === "register" && (<><label htmlFor="pw2">Confirm password</label>
+        <div style={{ display: "grid", marginBottom: 14 }}>
+          <input id="pw2" type={showPw ? "text" : "password"} value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Repeat your password" autoComplete="new-password" style={{ gridArea: "1/1", paddingRight: 40, marginBottom: 0 }} />
+          <button type="button" className="link-btn" onClick={() => setShowPw((s) => !s)} aria-label={showPw ? "Hide password" : "Show password"} title={showPw ? "Hide password" : "Show password"}
+            style={{ gridArea: "1/1", justifySelf: "end", alignSelf: "center", marginRight: 10, fontSize: 16, textDecoration: "none", opacity: .7 }}>👁</button>
+        </div></>)}
         {err && <div className="form-error" role="alert">{err}</div>}
         <button className="btn" type="submit" disabled={busy} style={{ width: "100%" }}>{busy ? "Please wait…" : mode === "login" ? <>Log in <I.arrow /></> : <>Create account <I.arrow /></>}</button>
         <p className="form-note" style={{ marginTop: 12 }}>

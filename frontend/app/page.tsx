@@ -26,7 +26,7 @@ export default function Home() {
       <section className="hero">
         <HeroScene />
         <div className="hero-inner">
-          <span className="eyebrow"><span className="dot" /> Self-hosted · Works offline · T1 core</span>
+          <span className="eyebrow"><span className="dot" /> Self-hosted · Works offline</span>
           <h1>Run hackathons on your<br />own infrastructure.</h1>
           <p>Dogfood is a self-hosted platform for managing hackathon events: publish events, form teams with secure invitations, collect submissions before a server-enforced deadline, and present every project in a public gallery. No cloud accounts or external services required.</p>
           <div className="hero-cta">

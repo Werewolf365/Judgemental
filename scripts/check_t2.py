@@ -237,13 +237,17 @@ check("cross-linked evaluations submitted (unanimous design)", ok)
 s, b = J(f"/events/{EV}/assignments/batch", O, "POST", {})
 check("batch report carries connectivity (connected, no repairs needed)",
       s == 200 and b.get("connected") is True and b.get("repairs") == []
-      and b.get("assignments_created") == 0, f"got {s} {b}")
+      and b.get("assignments_created") == 0
+      and b.get("min_bridge") == 2 and b.get("weak_bridges") == 0
+      and b.get("strengthened") == [], f"got {s} {b}")
 s, b = J(f"/events/{EV}/judges", O)
 bal = b.get("balance", {})
+bl = {i["key"]: i["level"] for i in bal.get("checklist", [])}
 check("event balance healthy (spread 0, connected, checklist all ok)",
       bal.get("connected") is True and bal.get("workload", {}).get("spread") == 0
-      and len(bal.get("checklist", [])) == 5
-      and all(i["level"] == "ok" for i in bal.get("checklist", [])),
+      and len(bal.get("checklist", [])) == 6
+      and all(i["level"] == "ok" for i in bal.get("checklist", []))
+      and bl.get("bridge_strength") == "ok",
       f"{bal}")
 
 # ---- deadline blocks scoring ----

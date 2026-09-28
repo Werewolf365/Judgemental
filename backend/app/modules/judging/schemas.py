@@ -1,5 +1,6 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional
+import math
 
 
 class CriterionIn(BaseModel):
@@ -7,6 +8,8 @@ class CriterionIn(BaseModel):
     description: Optional[str] = Field(default=None, max_length=2000)
     weight: Optional[float] = None
     display_order: int = Field(default=0, ge=-1000000, le=1000000)
+    score_lo: Optional[float] = None
+    score_hi: Optional[float] = None
 
     @field_validator("name")
     @classmethod
@@ -24,6 +27,22 @@ class CriterionIn(BaseModel):
         if not (0 < v <= 100):
             raise ValueError("weight must be more than 0 and at most 100")
         return v
+
+    @field_validator("score_lo", "score_hi")
+    @classmethod
+    def _scale_finite(cls, v):
+        if v is None:
+            return None
+        if not math.isfinite(v):
+            raise ValueError("criterion scale bounds must be finite numbers")
+        return v
+
+    @model_validator(mode="after")
+    def _scale_order(self):
+        if self.score_lo is not None and self.score_hi is not None:
+            if not self.score_hi > self.score_lo:
+                raise ValueError("score_hi must be greater than score_lo")
+        return self
 
 
 class JudgingConfigIn(BaseModel):

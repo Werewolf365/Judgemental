@@ -30,7 +30,7 @@ throughout, never the fixture `judges.id` rows — see context.md §17/D1.
 The fixture `judges`/`scores`/`judge_tracks` tables stay as seeded legacy):
 
 - events += judging_open, judging_close (nullable UTC), judges_per_project int default 2, rolling_judging bool default true
-- rubric_criteria(id, event_id, name unique-per-event, description?, weight float nullable, display_order, is_active)
+- rubric_criteria(id, event_id, name unique-per-event, description?, weight float nullable, display_order, is_active, score_lo/hi float default 0/10 with CHECK hi > lo)
 - event_judges(event_id, user_id, is_active, assigned_by?) — organizer-roster pattern; removal deactivates, never deletes
 - judge_assignments(id, event_id, project_id, judge_user_id, status ASSIGNED/IN_PROGRESS/COMPLETED/REVOKED, completed_at?) + partial unique index (project_id, judge_user_id) WHERE status <> 'REVOKED'
 - evaluations(id, assignment_id unique, event_id, project_id, judge_user_id, scores JSON {criterion_id: number}, comment?, status DRAFT/SUBMITTED, weighted_score snapshot, submitted_at?)

@@ -54,7 +54,9 @@ async def create_criterion(event_id: str, body: CriterionIn, request: Request,
         service.check_weight_cap(res.scalars().all(), None, body.weight)
     c = RubricCriterion(id=f"rub_{uuid.uuid4().hex[:8]}", event_id=e.id,
                         name=body.name, description=body.description,
-                        weight=body.weight, display_order=body.display_order)
+                        weight=body.weight, display_order=body.display_order,
+                        score_lo=body.score_lo if body.score_lo is not None else 0.0,
+                        score_hi=body.score_hi if body.score_hi is not None else 10.0)
     db.add(c)
     try:
         await db.commit()
@@ -89,6 +91,10 @@ async def patch_criterion(criterion_id: str, body: CriterionIn, request: Request
     c.description = body.description
     c.weight = body.weight
     c.display_order = body.display_order
+    # Omitted scale bounds reset to the 0–10 default (same convention as
+    # weight: PATCH carries full objects, not diffs).
+    c.score_lo = body.score_lo if body.score_lo is not None else 0.0
+    c.score_hi = body.score_hi if body.score_hi is not None else 10.0
     try:
         await db.commit()
     except Exception:

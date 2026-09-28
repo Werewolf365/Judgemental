@@ -253,7 +253,8 @@ export default function EventPage({ params }: { params: { slug: string } }) {
       setJoined(true);
       setMsg("Registration complete! Redirecting to your workspace to create a team…");
       // Give the user a moment to read the message, then redirect to dashboard
-      setTimeout(() => { window.location.href = "/dashboard"; }, 1200);
+      // with the event preselected for team creation.
+      setTimeout(() => { window.location.href = `/dashboard?event=${data.event.id}`; }, 1200);
     } catch (e: any) { setMsg(e.message); }
     finally { setBusy(false); }
   }

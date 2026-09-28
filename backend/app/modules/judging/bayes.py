@@ -131,11 +131,14 @@ async def calculate_bayes(event_id: str, request: Request,
         weights = service.resolve_weights(crits) if crits else {}
     except Exception as ex:
         err(422, "validation_error", f"Cannot score under the current rubric: {ex}")
+    scales = {c.id: (float(c.score_lo if c.score_lo is not None else 0.0),
+                     float(c.score_hi if c.score_hi is not None else 10.0))
+              for c in crits}
 
     observations, skipped, fallbacks = [], [], 0
     for v in evals:
         try:
-            score = hier_score.score_evaluation(v.scores or {}, weights)
+            score = hier_score.score_evaluation(v.scores or {}, weights, scales)
         except ValueError:
             # Stale-criterion fallback: the evaluation's own snapshot (taken
             # under the weights then in force) is already on the 0..10 scale.

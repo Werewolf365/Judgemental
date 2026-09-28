@@ -21,6 +21,7 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
   const [results, setResults] = useState<any>(null);
   const [runs, setRuns] = useState<any[]>([]);
   const [msg, setMsg] = useState("");
+  const [settingsSaved, setSettingsSaved] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ title: string; body: React.ReactNode } | null>(null);
 
@@ -28,6 +29,8 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
   const [cName, setCName] = useState("");
   const [cDesc, setCDesc] = useState("");
   const [cWeight, setCWeight] = useState("");
+  const [cLo, setCLo] = useState("");
+  const [cHi, setCHi] = useState("");
   const [editing, setEditing] = useState<any>(null);
   // judges form
   const [jEmail, setJEmail] = useState("");
@@ -62,10 +65,16 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
     try {
       const body: any = { name: cName.trim(), description: cDesc.trim() || null, display_order: rubric.length };
       if (cWeight.trim() !== "") body.weight = Number(cWeight);
+      if (cLo.trim() !== "" || cHi.trim() !== "") {
+        const lo = cLo.trim() === "" ? 0 : Number(cLo);
+        const hi = cHi.trim() === "" ? 10 : Number(cHi);
+        if (!(hi > lo)) { setMsg("Scale max must be greater than scale min."); return; }
+        body.score_lo = lo; body.score_hi = hi;
+      }
       const stop = capCheck(null, body.weight ?? null);
       if (stop) { setMsg(stop); return; }
       await api(`/events/${eventId}/rubric`, { method: "POST", body: JSON.stringify(body) });
-      setCName(""); setCDesc(""); setCWeight("");
+      setCName(""); setCDesc(""); setCWeight(""); setCLo(""); setCHi("");
       await load();
     } catch (e: any) { setMsg(e.message); }
     finally { setBusy(false); }
@@ -78,6 +87,12 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
         display_order: editing.display_order ?? 0 };
       if (editing.weight === "" || editing.weight == null) body.weight = null;
       else body.weight = Number(editing.weight);
+      const elo = editing.score_lo === "" || editing.score_lo == null ? null : Number(editing.score_lo);
+      const ehi = editing.score_hi === "" || editing.score_hi == null ? null : Number(editing.score_hi);
+      if ((elo != null || ehi != null) && !((ehi ?? 10) > (elo ?? 0))) {
+        setMsg("Scale max must be greater than scale min."); return;
+      }
+      body.score_lo = elo; body.score_hi = ehi;
       const stop = capCheck(editing.id, body.weight);
       if (stop) { setMsg(stop); return; }
       await api(`/rubric/${editing.id}`, { method: "PATCH", body: JSON.stringify(body) });
@@ -125,13 +140,14 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
     finally { setBusy(false); }
   }
   async function saveSettings() {
-    setMsg(""); setBusy(true);
+    setMsg(""); setSettingsSaved(""); setBusy(true);
     try {
       await api(`/events/${eventId}/judging`, { method: "PATCH", body: JSON.stringify({
         judging_open: sOpen || null, judging_close: sClose || null,
         judges_per_project: Number(sPer), rolling_judging: sRolling,
       }) });
       setMsg("Judging settings saved.");
+      setSettingsSaved(`Saved ✓ ${new Date().toLocaleTimeString()}`);
       await load();
     } catch (e: any) { setMsg(e.message); }
     finally { setBusy(false); }
@@ -216,10 +232,15 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
                   </span>
                   <input aria-label="Description" value={editing.description || ""} style={{ gridColumn: "1 / -1" }}
                     onChange={(e) => setEditing({ ...editing, description: e.target.value })} placeholder="Instructions for the judge" />
+                  <input aria-label="Scale min" type="number" step="any" value={editing.score_lo ?? ""}
+                    onChange={(e) => setEditing({ ...editing, score_lo: e.target.value })} placeholder="Scale min, blank = 0" />
+                  <input aria-label="Scale max" type="number" step="any" value={editing.score_hi ?? ""}
+                    onChange={(e) => setEditing({ ...editing, score_hi: e.target.value })} placeholder="Scale max, blank = 10" />
                 </div>
               ) : (
                 <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                   <div><b>{c.name}</b>{c.weight != null && <span style={{ color: "var(--muted)" }}> · {c.weight}%</span>}
+                    {(c.score_lo !== 0 || c.score_hi !== 10) && <span style={{ color: "var(--muted)" }}> scale {c.score_lo}-{c.score_hi}</span>}
                     {c.description && <div style={{ fontSize: 13, color: "var(--muted)" }}>{c.description}</div>}</div>
                   {!c.is_active && <span className="badge badge-muted">Deactivated</span>}
                   <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
@@ -238,6 +259,10 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
                 <input aria-label="New criterion weight" type="number" min={0} max={100} step={1} value={cWeight}
                   onChange={(e) => setCWeight(e.target.value)} placeholder="Weight %, blank = equal" />
                 <input aria-label="New criterion description" value={cDesc} onChange={(e) => setCDesc(e.target.value)} placeholder="Instructions for the judge" />
+                <input aria-label="Scale min" type="number" step="any" value={cLo}
+                  onChange={(e) => setCLo(e.target.value)} placeholder="Scale min, blank = 0" />
+                <input aria-label="Scale max" type="number" step="any" value={cHi}
+                  onChange={(e) => setCHi(e.target.value)} placeholder="Scale max, blank = 10" />
               </div>
               <div style={{ marginTop: 10 }}><button className="btn" type="submit" disabled={busy}>Add criterion</button></div>
             </form>
@@ -296,16 +321,17 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
           <h2>Judging window</h2>
           <p style={{ color: "var(--muted)" }}>Empty means “judge whenever”. Once the deadline passes, scores are refused and the final calculation unlocks.</p>
           <label>Judging opens (UTC)</label>
-          <DateTimePicker value={sOpen} onChange={setSOpen} placeholder="No opening restriction" />
+          <DateTimePicker value={sOpen} onChange={(v) => { setSOpen(v); setSettingsSaved(""); }} placeholder="No opening restriction" />
           <label>Judging closes (UTC)</label>
-          <DateTimePicker value={sClose} onChange={setSClose} placeholder="No deadline yet" />
+          <DateTimePicker value={sClose} onChange={(v) => { setSClose(v); setSettingsSaved(""); }} placeholder="No deadline yet" />
           <label>Judges per project (applies to future assignments)</label>
-          <input type="number" min={1} max={10} value={sPer} onChange={(e) => setSPer(Number(e.target.value))} />
+          <input type="number" min={1} max={10} value={sPer} onChange={(e) => { setSPer(Number(e.target.value)); setSettingsSaved(""); }} />
           <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14.5 }}>
-            <input type="checkbox" checked={sRolling} onChange={(e) => setSRolling(e.target.checked)} style={{ width: "auto", margin: 0 }} />
+            <input type="checkbox" checked={sRolling} onChange={(e) => { setSRolling(e.target.checked); setSettingsSaved(""); }} style={{ width: "auto", margin: 0 }} />
             Rolling assignment — assign each submission as it arrives (off = covered by the background sweep)
           </label>
           <div style={{ marginTop: 10 }}><button className="btn" disabled={busy} onClick={saveSettings}>Save judging settings</button></div>
+          {settingsSaved && <p className="form-note" role="status" style={{ color: "var(--leaf-deep)", fontWeight: 700 }}>{settingsSaved} — these are the live settings.</p>}
         </div>
       )}
 

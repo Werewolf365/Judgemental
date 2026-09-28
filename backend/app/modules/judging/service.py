@@ -142,4 +142,6 @@ def resolve_weights(criteria: list) -> dict:
 def criterion_out(c) -> dict:
     return {"id": c.id, "event_id": c.event_id, "name": c.name,
             "description": c.description, "weight": c.weight,
-            "display_order": c.display_order, "is_active": c.is_active}
+            "display_order": c.display_order, "is_active": c.is_active,
+            "score_lo": float(c.score_lo if c.score_lo is not None else 0.0),
+            "score_hi": float(c.score_hi if c.score_hi is not None else 10.0)}

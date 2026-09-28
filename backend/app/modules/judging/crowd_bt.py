@@ -11,13 +11,15 @@ Model (crowd_bt_architecture_poc_corrected.md):
 Fitted by BFGS with analytic gradient from the all-zeros start.
 Sum-to-zero normalization is applied post-fit so reported thetas are
 symmetric and comparable across recalculations.
-Laplace uncertainty (diagonal of inverse Hessian) is returned as theta_std
-so callers can report confidence intervals and flag close calls.
+Laplace uncertainty uses the FULL inverse-Hessian covariance (theta block),
+propagated through the centering shift — including the reference project,
+which is no longer special after normalization. Callers get honest marginal
+stds for every project, usable for confidence intervals and close calls.
 """
 import math
 
 THETA_SIGMA = 2.0
-MODEL_VERSION = "crowd-bt-map-v2"
+MODEL_VERSION = "crowd-bt-map-v3"
 CLOSE_CALL_THRESHOLD = 0.90   # P(A>B) below this → "close call", not a verdict
 
 
@@ -39,7 +41,10 @@ def fit(comparisons: list, project_ids: list, judge_ids: list, *,
 
     Returns:
         thetas          — {project_id: float}, sum-to-zero normalized
-        theta_stds      — {project_id: float}, Laplace std from Hessian diagonal
+        theta_stds      — {project_id: float}, Laplace marginal stds: the full
+                          theta-block covariance propagated through the
+                          centering shift, so the reference project gets a
+                          real std like everyone else
         log_reliabilities — {judge_id: float}
         reliabilities   — {judge_id: float}
         success         — bool (optimizer convergence flag)
@@ -48,7 +53,7 @@ def fit(comparisons: list, project_ids: list, judge_ids: list, *,
         close_calls     — [{project_a, project_b, p_a_beats_b}] adjacent-rank
                           pairs where P < CLOSE_CALL_THRESHOLD
         n_comparisons   — int
-        reference_project — str (before normalization; after normalization all
+        reference_project — str (fit-time pin; after normalization all
                             thetas are shifted, reference is no longer 0)
         model_version   — str
     """
@@ -133,13 +138,37 @@ def fit(comparisons: list, project_ids: list, judge_ids: list, *,
     theta_arr = xv[:n_free]
     log_r_arr = xv[n_free:]
 
-    # --- Laplace uncertainty: diagonal of inverse Hessian ---
-    # BFGS stores the approximate inverse Hessian; its diagonal gives
-    # Var(param_i) under the Laplace approximation.
-    hess_inv = np.asarray(res.hess_inv) if hasattr(res, "hess_inv") else None
-    theta_var = np.diag(hess_inv)[:n_free] if hess_inv is not None else np.zeros(n_free)
-    theta_var = np.maximum(theta_var, 0.0)   # clamp floating-point negatives
-    theta_std_arr = np.sqrt(theta_var)
+    # --- Laplace uncertainty: full covariance propagated through centering ---
+    # BFGS stores the approximate inverse Hessian H over [theta, log_r].
+    # Reported thetas are theta'_i = theta_i - m with m = mean(all thetas,
+    # reference 0 included), so marginal variances must propagate through m:
+    #   Var(theta'_i) = S_ii + Var(m) - 2*Cov(theta_i, m),
+    #   Var(m) = sum(S)/P^2,  Cov(theta_i, m) = row_sum_i/P,
+    # with S the theta block of H and P = n_free + 1. The reference project
+    # (a constant 0 pre-shift) gets Var(m): it moves with the shift exactly
+    # like everything else, so a zero there would understate every pairwise
+    # probability involving it. Diagonal-only propagation would miss the
+    # Cov(theta_i, m) terms for all projects, not just the reference.
+    n_dim = n_free + n_judges
+    hess_inv = np.asarray(res.hess_inv, dtype=float) if hasattr(res, "hess_inv") else None
+    if (hess_inv is not None and hess_inv.shape == (n_dim, n_dim)
+            and np.all(np.isfinite(hess_inv))):
+        H = 0.5 * (hess_inv + hess_inv.T)   # enforce symmetry against drift
+        S = H[:n_free, :n_free]
+        P = n_free + 1
+        row_sums = S.sum(axis=1)
+        var_m = float(S.sum() / (P ** 2))   # >= 0 when S is PSD
+        var_shifted = np.diag(S) + var_m - 2.0 * row_sums / P
+        var_shifted = np.maximum(var_shifted, 0.0)   # clamp float dust
+        ref_var = max(var_m, 0.0)
+    else:
+        # No usable Hessian (should not happen with BFGS): fall back to
+        # zeros rather than fabricating uncertainty. rank() then treats
+        # gaps heuristically, documented there.
+        var_shifted = np.zeros(n_free)
+        ref_var = 0.0
+    theta_std_arr = np.sqrt(var_shifted)
+    ref_std = math.sqrt(ref_var)
 
     # --- Sum-to-zero normalization ---
     # BT likelihood only depends on differences; subtracting the mean
@@ -150,11 +179,13 @@ def fit(comparisons: list, project_ids: list, judge_ids: list, *,
     mean_theta = float(np.mean(all_theta_vals))
     theta_arr_norm = theta_arr - mean_theta
     ref_theta_norm = ref_theta - mean_theta
-    # Variance is shift-invariant, so theta_std_arr is unchanged.
+    # NOTE: variances are NOT shift-invariant here — the shift m is itself a
+    # function of the fitted params, so its variance propagates (done above).
+    # Only a fixed constant shift would leave variances unchanged.
 
     # Build output dicts
     thetas: dict = {reference_project: ref_theta_norm}
-    theta_stds: dict = {reference_project: 0.0}   # reference was fixed, std≈0
+    theta_stds: dict = {reference_project: float(ref_std)}
     for i, pid in enumerate(free):
         thetas[pid] = float(theta_arr_norm[i])
         theta_stds[pid] = float(theta_std_arr[i])
@@ -211,7 +242,15 @@ def rank(thetas: dict, theta_stds: dict | None = None) -> list:
         })
         last_theta = theta
 
-    # Annotate close calls between adjacent ranked projects
+    # Annotate close calls between adjacent ranked projects.
+    # Assumption, stated plainly: the two thetas are treated as INDEPENDENT
+    # Gaussians, so Var(θ_A − θ_B) = σ²_A + σ²_B. The Laplace posterior does
+    # not factor this way — strengths share the reference pin and the
+    # sum-to-zero shift, so off-diagonal covariance exists and is dropped
+    # here. Effect: probabilities ignore correlation and can err either way;
+    # they remain useful as a flagging heuristic, not as calibrated odds.
+    # Do not build betting-grade claims on p_beats_next without a correlated
+    # treatment (multivariate draw or full-covariance contrast variance).
     for i in range(len(out) - 1):
         a, b = out[i], out[i + 1]
         sa, sb = a["theta_std"], b["theta_std"]

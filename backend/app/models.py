@@ -91,6 +91,8 @@ class Event(Base):
     event_end = Column(DateTime(timezone=True), nullable=True)
     submissions_open = Column(DateTime(timezone=True), nullable=True)
     submissions_close = Column(DateTime(timezone=True), nullable=True)
+    # IANA zone the organizer entered the deadline in (storage stays UTC).
+    timezone = Column(Text, nullable=False, default="UTC", server_default="UTC")
     status = Column(SAEnum(EventStatus, name="event_status"), nullable=False, default=EventStatus.DRAFT)
     gallery_visibility = Column(SAEnum(GalleryVisibility, name="gallery_visibility"), nullable=False, default=GalleryVisibility.PUBLIC, server_default="PUBLIC")
     # --- T2 judging configuration. The window bounds are optional: when unset,
@@ -279,11 +281,16 @@ class RubricCriterion(Base):
     weight is a nullable percentage. NULL on every active criterion means
     "no explicit weights" → equal weighting. Once any criterion carries an
     explicit weight, all of them must (enforced in the route, not here).
-    Deactivation (is_active=False) is the post-start removal path; hard
-    DELETE is only allowed before judging starts (also enforced in routes).
+    score_lo/score_hi declare the scale judges score against (default 0–10).
+    Scores are validated into this range at input and normalized by it
+    before weighting, so rubrics on any scale stay comparable. A CHECK
+    constraint enforces hi > lo. Deactivation (is_active=False) is the
+    post-start removal path; hard DELETE is only allowed before judging
+    starts (also enforced in routes).
     """
     __tablename__ = "rubric_criteria"
-    __table_args__ = (UniqueConstraint("event_id", "name", name="uq_rubric_event_name"),)
+    __table_args__ = (UniqueConstraint("event_id", "name", name="uq_rubric_event_name"),
+                      CheckConstraint("score_hi > score_lo", name="ck_rubric_scale_order"),)
     id = Column(Text, primary_key=True, default=_uuid)
     event_id = Column(Text, ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True)
     name = Column(Text, nullable=False)
@@ -291,6 +298,8 @@ class RubricCriterion(Base):
     weight = Column(Float, nullable=True)
     display_order = Column(Integer, nullable=False, default=0)
     is_active = Column(Boolean, nullable=False, default=True)
+    score_lo = Column(Float, nullable=False, default=0.0, server_default="0")
+    score_hi = Column(Float, nullable=False, default=10.0, server_default="10")
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -391,12 +400,14 @@ class ModelProjectResult(Base):
     project_id = Column(Text, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
     theta = Column(Float, nullable=False)
     rank = Column(Integer, nullable=False)
-    # Laplace uncertainty: std from BFGS inverse-Hessian diagonal. NULL for
-    # legacy runs predating migration 0013. Use to compute P(A>B) intervals.
+    # Laplace uncertainty: marginal std with shift propagation (see
+    # crowd_bt.fit). NULL for runs predating migration 0013.
     theta_std = Column(Float, nullable=True)
     # 'High' or 'Low': whether this project's rank is a confident verdict or
-    # a close call (P(A beats adjacent rank) < 90%). Defaults High for legacy.
-    confidence = Column(Text, nullable=False, default="High")
+    # a close call (P(A beats adjacent rank) < 90%). NULL means uncertainty
+    # was never computed (pre-0013 legacy rows) — unknown, not confident.
+    # New runs always write a real value; nothing may default this to High.
+    confidence = Column(Text, nullable=True)
 
 class ModelJudgeResult(Base):
     __tablename__ = "model_judge_results"

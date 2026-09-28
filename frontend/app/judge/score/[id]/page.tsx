@@ -22,9 +22,14 @@ function liveTotal(rubric: any[], scores: Record<string, number>): number | null
   } else {
     for (const c of act) w[c.id] = 1 / act.length;
   }
+  // Normalize-first on each criterion's declared scale (server mirrors this
+  // in submit_scores); with default 0–10 scales this is Σ w·score exactly.
   let t = 0;
-  for (const c of act) t += (scores[c.id] ?? 0) * w[c.id];
-  return t;
+  for (const c of act) {
+    const lo = c.score_lo ?? 0, hi = c.score_hi ?? 10;
+    t += ((scores[c.id] ?? 0) - lo) / (hi - lo) * w[c.id];
+  }
+  return t * 10;
 }
 
 export default function ScoreProject({ params }: { params: { id: string } }) {
@@ -123,10 +128,10 @@ export default function ScoreProject({ params }: { params: { id: string } }) {
           <div key={c.id} style={{ padding: "10px 0", borderTop: "1px solid var(--line)" }}>
             <label htmlFor={`score-${c.id}`}>{c.name}{c.weight != null ? ` (${c.weight}%)` : ""}</label>
             {c.description && <p className="form-note" style={{ marginTop: -4 }}>{c.description}</p>}
-            <input id={`score-${c.id}`} type="number" min={0} max={10} step={0.5}
+            <input id={`score-${c.id}`} type="number" min={c.score_lo ?? 0} max={c.score_hi ?? 10} step={0.5}
               value={scores[c.id] ?? ""} disabled={closed || busy}
               onChange={(e) => { setScores({ ...scores, [c.id]: e.target.value }); markDirty(); }}
-              placeholder="0 – 10" style={{ maxWidth: 200 }} />
+              placeholder={`${c.score_lo ?? 0} – ${c.score_hi ?? 10}`} style={{ maxWidth: 200 }} />
           </div>
         ))}
         <label htmlFor="judge-comment">Comment <span style={{ fontWeight: 400 }}>(optional, visible to organizers)</span></label>

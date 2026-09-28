@@ -51,6 +51,7 @@ def event_out(e: Event) -> dict:
             "registration_start": f(e.registration_start), "registration_close": f(e.registration_close),
             "event_start": f(e.event_start), "event_end": f(e.event_end),
             "submissions_open": f(e.submissions_open), "submissions_close": f(e.submissions_close),
+            "timezone": e.timezone or "UTC",
             "status": e.status.value if hasattr(e.status, "value") else str(e.status),
             "gallery_visibility": e.gallery_visibility.value if hasattr(e.gallery_visibility, "value") else str(e.gallery_visibility or "PUBLIC")}
 
@@ -90,7 +91,7 @@ async def create_event(body: EventIn, request: Request, db: AsyncSession = Depen
         err(409, "already_joined", "Slug already taken")
     import uuid
     e = Event(id=f"evt_{uuid.uuid4().hex[:8]}", slug=slug, name=body.name, description=body.description,
-              status=EventStatus.DRAFT, created_by=user.id, **d)
+              status=EventStatus.DRAFT, created_by=user.id, timezone=(body.timezone or "UTC")[:64], **d)
     db.add(e)
     # The creator is the first organizer of their own event.
     db.add(EventOrganizer(event_id=e.id, user_id=user.id, assigned_by=user.id))
@@ -130,6 +131,8 @@ async def patch_event(event_id: str, body: EventIn, request: Request, db: AsyncS
             e.gallery_visibility = GalleryVisibility(str(vals["gallery_visibility"]).upper())
         except ValueError:
             err(422, "validation_error", "gallery_visibility must be PUBLIC, PARTICIPANTS or ORGANIZERS_ONLY")
+    if "timezone" in vals and vals["timezone"]:
+        e.timezone = str(vals["timezone"])[:64]
     for k, v in vals.items():
         if k in ("name", "slug") and not v:
             continue  # never wipe name/slug with an empty PATCH value

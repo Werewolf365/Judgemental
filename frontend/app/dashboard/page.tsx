@@ -113,7 +113,11 @@ function ParticipantHome({ me }: { me: Me }) {
       try {
         const [t, s, e] = await Promise.all([api("/teams"), api("/submissions"), api("/public/events")]);
         setTeams(t.teams || []); setSubs(s.projects || []); setEvents(e.events || []);
-        if (e.events?.[0]) setEventId(e.events[0].id);
+        // After event registration the event page redirects here with ?event=<id>
+        // so the team form opens on the event just joined, not the first in the list.
+        const want = new URLSearchParams(window.location.search).get("event");
+        if (want && (e.events || []).some((x: any) => x.id === want)) setEventId(want);
+        else if (e.events?.[0]) setEventId(e.events[0].id);
       } catch (e: any) { setMsg(e.message); }
       finally { setLoading(false); }
     })();

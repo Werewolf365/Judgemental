@@ -4,7 +4,8 @@ Run inside the api image (code is baked in there):
     docker compose exec -T api python -m pytest app/modules/judging/tests/ -q
 """
 from app.modules.judging.assign import (
-    _fill_project_slots, _rank_candidates, _slot_ranking, components_of)
+    _fill_project_slots, _rank_candidates, _slot_ranking, components_of,
+    min_bridge, shared_judge_count, single_shared_pairs)
 
 
 def test_lowest_load_wins():
@@ -73,6 +74,22 @@ def test_load_still_outranks_bridge():
     assert _slot_ranking(st, "px", ["a"])[0] == "c"
 
 
+def test_redundancy_beats_attach_among_ties():
+    # px has picked a. t serves q, which shares exactly judge a with
+    # px-so-far (adding t completes a redundant bridge); c serves three
+    # projects but completes nothing. One component throughout, all loads
+    # tie, so neither balance nor bridging discriminates — redundancy picks
+    # t despite c serving more projects overall.
+    live = {"a": {"px", "q"}, "t": {"q", "w"}, "c": {"w", "x", "y"}}
+    st = {"loads": {"a": 1, "t": 1, "c": 1},
+          "live": {j: set(ps) for j, ps in live.items()},
+          "eligible_ids": {"a", "t", "c"},
+          "coverage": {"px": {"a"}, "q": {"a", "t"}, "w": {"t", "c"},
+                       "x": {"c"}, "y": {"c"}}}
+    ranked = _slot_ranking(st, "px", ["a"])
+    assert ranked[0] == "t"
+
+
 def test_components_single():
     live = {"j1": {"p1", "p2"}, "j2": {"p2", "p3"}}
     comps = components_of(live)
@@ -93,3 +110,23 @@ def test_components_empty_and_singleton():
 def test_components_ignores_idle_judges():
     live = {"j1": {"p1", "p2"}, "j2": set()}
     assert components_of(live) == [{"p1", "p2"}]
+
+
+def test_shared_judge_count():
+    cov = {"p1": {"a", "b"}, "p2": {"b", "c"}, "p3": {"d"}}
+    assert shared_judge_count(cov, "p1", "p2") == 1
+    assert shared_judge_count(cov, "p1", "p3") == 0
+    assert shared_judge_count(cov, "p1", "p9") == 0
+
+
+def test_single_shared_pairs_finds_thin_bridges():
+    cov = {"p1": {"a", "b"}, "p2": {"b", "c"}, "p3": {"b", "c"}, "p4": {"d"}}
+    # (p1,p2): {b}; (p1,p3): {b}; (p2,p3): {b,c} -> not thin; p4 isolated.
+    assert single_shared_pairs(cov) == [("p1", "p2"), ("p1", "p3")]
+
+
+def test_min_bridge():
+    assert min_bridge({}) is None
+    assert min_bridge({"p1": {"a"}}) is None  # no linked pairs at all
+    assert min_bridge({"p1": {"a", "b"}, "p2": {"b", "c"}}) == 1
+    assert min_bridge({"p1": {"a", "b"}, "p2": {"a", "b"}}) == 2

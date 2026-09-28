@@ -67,19 +67,25 @@ def normalize_criterion_score(value: float, lo: float = SCALE_MIN,
 
 
 def score_evaluation(raw_scores: dict, weights: dict,
-                     lo: float = SCALE_MIN, hi: float = SCALE_MAX) -> float:
-    """Normalized weighted total for one evaluation, back on the display scale.
+                     scales: dict | None = None) -> float:
+    """Normalized weighted total for one evaluation, back on the 0–10 display
+    scale.
 
     raw_scores: {criterion_id: number} as stored on the evaluation.
     weights: {criterion_id: normalized share} (sums to ~1, e.g. from
     service.resolve_weights). Only criteria present in BOTH maps count; their
     shares are renormalized so dynamic rubrics (any count, any weights,
     deactivated criteria) always produce a comparable total. Needs >= 1.
+    scales: optional {criterion_id: (lo, hi)} declaring each criterion's
+    input scale; each score is normalized on its own scale first, so
+    mixed-scale rubrics stay comparable. Missing entries default to 0–10.
+    With all-default scales this reduces exactly to Σ share·score.
     """
     if not isinstance(raw_scores, dict) or not raw_scores:
         raise ValueError("evaluation has no criterion scores")
     if not isinstance(weights, dict) or not weights:
         raise ValueError("no rubric weights to score against")
+    scales = scales or {}
     present = [cid for cid in raw_scores if cid in weights]
     if not present:
         raise ValueError("evaluation scores match no active rubric criterion")
@@ -89,8 +95,9 @@ def score_evaluation(raw_scores: dict, weights: dict,
     total = 0.0
     for cid in present:
         share = float(weights[cid]) / wsum
+        lo, hi = scales.get(cid, (SCALE_MIN, SCALE_MAX))
         total += share * normalize_criterion_score(raw_scores[cid], lo, hi)
-    return lo + total * (hi - lo)
+    return SCALE_MIN + total * (SCALE_MAX - SCALE_MIN)
 
 
 def _seed_from(value: str) -> int:

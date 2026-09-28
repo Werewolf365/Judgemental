@@ -50,7 +50,7 @@ def _fit_reference():
 
 def test_reference_ranking_order_matches_documented():
     out = _fit_reference()
-    assert out["model_version"] == "crowd-bt-map-v2"
+    assert out["model_version"] == "crowd-bt-map-v3"
     ranking = crowd_bt.rank(out["thetas"], out.get("theta_stds"))
     order = [r["project_id"] for r in ranking]
     assert order == EXPECTED_THETA_ORDER
@@ -85,16 +85,17 @@ def test_sum_to_zero():
 
 
 def test_theta_stds_returned_and_positive():
-    """Laplace stds must be present, non-negative, and non-trivial for free params."""
+    """Laplace stds must be present and non-trivial for every project,
+    reference included: after the centering shift the reference moves with
+    the mean, so a zero there would understate its pairwise probabilities."""
     out = _fit_reference()
     assert "theta_stds" in out
     stds = out["theta_stds"]
-    # Reference project (prj_12) was fixed — its std is 0 by construction
-    assert stds["prj_12"] == 0.0
-    # All free projects should have positive std (inverse Hessian diagonal > 0)
-    free_stds = {p: v for p, v in stds.items() if p != "prj_12"}
-    assert all(v > 0 for v in free_stds.values()), \
-        f"Some theta_stds are non-positive: {free_stds}"
+    assert set(stds) == set(out["thetas"]), "stds must cover every project"
+    assert all(v > 0 for v in stds.values()), \
+        f"Some theta_stds are non-positive: {stds}"
+    assert all(v == v and abs(v) != float("inf") for v in stds.values()), \
+        "stds must be finite"
 
 
 def test_rank_annotates_close_calls():
@@ -154,6 +155,54 @@ def test_optimizer_diagnostics_present():
 def test_empty_comparisons_refused():
     with pytest.raises(ValueError):
         crowd_bt.fit([], POC_PROJECTS, [], reference_project="prj_12", priors={})
+
+
+def test_held_out_pairs_predicted_above_chance():
+    """3-fold cross-validation on synthetic data with known truth: fit on
+    two folds, predict the third from fitted thetas. Passes only if the
+    ranking generalizes — a regression net for predictive power, not just
+    plumbing. Deterministic (fixed seed); needs no fixtures or database."""
+    import itertools
+    import random
+    rnd = random.Random(7)
+    true = {"p0": -2.0, "p1": -1.0, "p2": 0.0, "p3": 1.0, "p4": 2.0}
+    judges = ["j0", "j1", "j2"]
+    pairs = []
+    for j in judges:
+        for a, b in itertools.combinations(sorted(true), 2):
+            d = (true[a] - true[b]) + rnd.gauss(0, 0.5)
+            if abs(d) < 1e-9:
+                continue
+            w, l = (a, b) if d > 0 else (b, a)
+            pairs.append({"judge_user_id": j, "winner_project_id": w,
+                          "loser_project_id": l, "weight": 1.0,
+                          "source_evaluation_ids": []})
+    assert len(pairs) >= 30
+    folds = [[], [], []]
+    for i, p in enumerate(pairs):
+        folds[i % 3].append(p)
+    accs = []
+    for k in range(3):
+        train = [p for i, f in enumerate(folds) if i != k for p in f]
+        held = folds[k]
+        pids = sorted({p["winner_project_id"] for p in train} |
+                      {p["loser_project_id"] for p in train})
+        out = crowd_bt.fit(train, pids, judges, reference_project=pids[0],
+                           priors={j: (0.0, 0.60) for j in judges})
+        th = out["thetas"]
+        correct = total = 0
+        for c in held:
+            w, l = c["winner_project_id"], c["loser_project_id"]
+            if w not in th or l not in th:
+                continue
+            p = 1.0 / (1.0 + math.exp(-(th[w] - th[l])))
+            total += 1
+            if p > 0.5:
+                correct += 1
+        assert total > 0
+        accs.append(correct / total)
+    mean_acc = sum(accs) / len(accs)
+    assert mean_acc > 0.65, f"held-out accuracy {mean_acc:.3f} {accs} — ranking does not generalize"
 
 
 def test_missing_prior_refused():

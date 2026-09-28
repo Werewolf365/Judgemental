@@ -12,6 +12,7 @@ class EventIn(BaseModel):
     submissions_open: Optional[str] = None
     submissions_close: Optional[str] = None
     gallery_visibility: Optional[str] = None
+    timezone: Optional[str] = Field(default=None, max_length=64)
 
 class TrackIn(BaseModel):
     name: str = Field(max_length=100)

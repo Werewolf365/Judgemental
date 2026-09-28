@@ -21,7 +21,8 @@ import uuid
 
 router = APIRouter(tags=["judge"])
 
-SCORE_MIN, SCORE_MAX = 0, 10
+SCORE_MIN, SCORE_MAX = 0, 10  # fallback display scale; per-criterion
+# [score_lo, score_hi] on the rubric row is authoritative (see _validate_scores).
 
 
 def _judge() -> object:
@@ -49,19 +50,23 @@ async def _own_assignment(db: AsyncSession, assignment_id: str, user: User) -> J
 
 
 def _validate_scores(criteria: list, scores: dict) -> dict:
-    """Keys must be active criterion ids; values numbers in [0, 10]."""
+    """Keys must be active criterion ids; each value must be a number inside
+    that criterion's declared [score_lo, score_hi] scale (default 0–10)."""
     if not isinstance(scores, dict):
         err(422, "validation_error", "scores must be an object of criterion_id to number")
-    known = {c.id for c in criteria if c.is_active}
+    scales = {c.id: (float(c.score_lo if c.score_lo is not None else 0.0),
+                     float(c.score_hi if c.score_hi is not None else 10.0))
+              for c in criteria if c.is_active}
     clean = {}
     for cid, v in scores.items():
-        if cid not in known:
+        if cid not in scales:
             err(422, "validation_error", f"Unknown or inactive criterion: {cid}")
         if isinstance(v, bool) or not isinstance(v, (int, float)):
             err(422, "validation_error", f"Score for “{cid}” must be a number")
-        if not (SCORE_MIN <= float(v) <= SCORE_MAX):
+        lo, hi = scales[cid]
+        if not (lo <= float(v) <= hi):
             err(422, "validation_error",
-                f"Scores must be between {SCORE_MIN} and {SCORE_MAX}")
+                f"Scores for this criterion must be between {lo:g} and {hi:g}")
         clean[cid] = float(v)
     return clean
 
@@ -183,7 +188,17 @@ async def submit_scores(assignment_id: str, db: AsyncSession = Depends(get_db),
         err(422, "validation_error",
             f"Still missing scores for: {', '.join(f'“{m}”' for m in missing)}")
     ev.scores = clean
-    ev.weighted_score = sum(clean[cid] * w for cid, w in weights.items())
+    # Snapshot on the 0–10 display scale via per-criterion normalization, so
+    # mixed-scale rubrics stay comparable. With default 0–10 scales this
+    # reduces exactly to Σ w·score (v/10·10 = v) — byte-identical history.
+    scales = {c.id: (float(c.score_lo if c.score_lo is not None else 0.0),
+                     float(c.score_hi if c.score_hi is not None else 10.0))
+              for c in criteria if c.is_active}
+    total = 0.0
+    for cid, w in weights.items():
+        lo, hi = scales[cid]
+        total += w * (clean[cid] - lo) / (hi - lo)
+    ev.weighted_score = total * 10.0
     ev.status = EvaluationStatus.SUBMITTED
     ev.submitted_at = utcnow()
     ev.updated_at = ev.submitted_at
