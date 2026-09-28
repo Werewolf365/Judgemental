@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, fetchMe } from "@/lib/api";
+import JudgeGate from "@/components/JudgeGate";
 
 export default function Teams() {
   const [teams, setTeams] = useState<any[]>([]);
@@ -25,6 +26,7 @@ export default function Teams() {
     })();
   }, [router]);
   if (loading) return <div className="card"><div className="skel" style={{ height: 120 }} /></div>;
+  if (role === "JUDGE") return <JudgeGate />;
   if ((role === "ORGANIZER" || role === "ADMIN") && !teams.length)
     return <div className="card empty" style={{ maxWidth: 560, margin: "40px auto" }}>
       <h1>Teams are a participant flow</h1>

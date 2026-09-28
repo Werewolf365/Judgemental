@@ -313,17 +313,17 @@ async def list_comments(project_id: str, db: AsyncSession = Depends(get_db),
     if not await _can_read_comments(db, e, p, user):
         err(403, "forbidden",
             "comments on this project are visible to its team and organizers only")
-    stmt = select(Comment, U.display_name).join(
+    stmt = select(Comment, U.display_name, U.avatar_url).join(
         U, U.id == Comment.author_user_id).where(
         Comment.project_id == p.id)
     if not service.is_staff(user):
         stmt = stmt.where(Comment.is_hidden == False)  # noqa
     rows = (await db.execute(stmt.order_by(Comment.created_at))).all()
     return {"comments": [{
-        "id": c.id, "author": name, "body": c.body,
+        "id": c.id, "author": name, "author_avatar": avatar, "body": c.body,
         "is_hidden": c.is_hidden,
         "created_at": c.created_at.isoformat() if c.created_at else None}
-        for c, name in rows]}
+        for c, name, avatar in rows]}
 
 
 @router.post("/public/projects/{project_id}/comments")

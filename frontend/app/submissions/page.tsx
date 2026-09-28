@@ -4,15 +4,19 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, fetchMe } from "@/lib/api";
 import { I } from "@/components/art";
+import JudgeGate from "@/components/JudgeGate";
 
 export default function Submissions() {
   const [subs, setSubs] = useState<any[]>([]);
   const [teamed, setTeamed] = useState<boolean | null>(null);
+  const [role, setRole] = useState("");
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   useEffect(() => {
     (async () => {
-      if (!await fetchMe()) { router.push("/login"); return; }
+      const m = await fetchMe();
+      if (!m) { router.push("/login"); return; }
+      setRole(m.role);
       try {
         setSubs((await api("/submissions")).projects || []);
         setTeamed(((await api("/teams")).teams || []).length > 0);
@@ -20,6 +24,7 @@ export default function Submissions() {
     })();
   }, [router]);
   if (loading) return <div className="card"><div className="skel" style={{ height: 120 }} /></div>;
+  if (role === "JUDGE") return <JudgeGate />;
   if (teamed === false) return (
     <div className="card empty" style={{ maxWidth: 560, margin: "40px auto" }}>
       <h1>Submissions unlock with a team</h1>

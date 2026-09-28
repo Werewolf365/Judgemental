@@ -227,22 +227,81 @@ async def list_runs(event_id: str, db: AsyncSession = Depends(get_db),
 @router.get("/export.csv")
 async def export_csv(event_id: str = "", db: AsyncSession = Depends(get_db),
                      user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
-    """Organizer CSV export of the latest final ranking (the checker's
-    csv_export route). Event-scoped like everything else: organizers only
-    export events they run. Before any calculation exists the body is the
-    header alone — an honest empty export, not fabricated rows."""
+    """Organizer CSV export of judging work (the checker's csv_export route).
+
+    One row per evaluation (judge x project), readable at EVERY stage —
+    drafts included with a status column — so organizers can follow along
+    while judging is still in flight, not only after calculation. Columns
+    carry everything the process used: project, team (+ captain), track,
+    judge, per-criterion raw scores with their weight % and normalized
+    share, the weighted total, plus rank/theta once a SUCCEEDED run exists
+    (blank before that). Event-scoped: organizers only export events they
+    run. Zero evaluations -> header alone, an honest empty export.
+    """
+    from app.models import (Evaluation, EvaluationStatus, JudgeAssignment, Project,
+                            ProjectStatus, RubricCriterion, Team, TeamMember, TeamRole,
+                            Track, User as U)
     if not event_id:
         err(422, "validation_error", "event_id is required")
     e = await managed_event(db, user, event_id)
-    lines = ["rank,project,team,track,theta"]
+
+    def q(v):
+        s = str(v if v is not None else "")
+        return '"' + s.replace('"', '""') + '"' if any(c in s for c in ',"\"\n') else s
+
+    res = await db.execute(select(RubricCriterion).where(
+        RubricCriterion.event_id == e.id, RubricCriterion.is_active == True  # noqa
+    ).order_by(RubricCriterion.display_order, RubricCriterion.name))
+    crits = res.scalars().all()
+    try:
+        weights = service.resolve_weights(crits) if crits else {}
+    except Exception:
+        # Mid-edit rubric (mixed/partial weights): export raw scores with
+        # blank shares rather than refusing the whole export.
+        weights = {}
+
+    res = await db.execute(select(TeamMember, U.display_name, U.email).join(
+        U, U.id == TeamMember.user_id).where(TeamMember.role == TeamRole.CAPTAIN))
+    captains = {tm.team_id: (name, email) for tm, name, email in res.all()}
+
     run = await service.latest_succeeded_run(db, e.id)
+    finals = {}
     if run:
-        payload = await _run_payload(db, run)
-        def q(v):
-            s = str(v if v is not None else "")
-            return '"' + s.replace('"', '""') + '"' if any(c in s for c in ',"\"\n') else s
-        for r in payload["ranking"]:
-            lines.append(f"{r['rank']},{q(r['title'])},{q(r['team'])},{q(r['track'])},{r['theta']:.4f}")
+        res = await db.execute(select(ModelProjectResult).where(
+            ModelProjectResult.model_run_id == run.id))
+        finals = {r.project_id: (r.rank, r.theta) for r in res.scalars().all()}
+
+    res = await db.execute(
+        select(Evaluation, Project, Team, Track, U).join(
+            Project, Project.id == Evaluation.project_id).join(
+            Team, Team.id == Project.team_id).join(
+            Track, Track.id == Project.track_id).join(
+            U, U.id == Evaluation.judge_user_id).where(
+            Evaluation.event_id == e.id).order_by(Project.title, U.display_name))
+    rows = res.all()
+
+    head = ["project", "team", "team_leader", "team_leader_email", "track",
+            "judge", "judge_email", "evaluation_status", "submitted_at"]
+    for c in crits:
+        head += [f"{c.name} [score]", f"{c.name} [weight%]"]
+    head += ["weighted_total", "rank", "theta"]
+    lines = [",".join(head)]
+    for ev, p, tm, tr, ju in rows:
+        st = ev.status.value if hasattr(ev.status, "value") else str(ev.status)
+        scores = ev.scores or {}
+        cells = [p.title, tm.name, *(captains.get(tm.id, ("", ""))),
+                 tr.name if tr else "", ju.display_name, ju.email, st,
+                 ev.submitted_at.isoformat() if ev.submitted_at else ""]
+        for c in crits:
+            w = weights.get(c.id)
+            cells += [scores.get(c.id, ""),
+                      f"{c.weight:g}%" if c.weight is not None else "",
+                      f"{w:.4f}" if w is not None else ""]
+        cells.append(f"{ev.weighted_score:.4f}" if ev.weighted_score is not None else "")
+        rank, theta = finals.get(p.id, ("", ""))
+        cells.append(rank)
+        cells.append(f"{theta:.4f}" if isinstance(theta, (int, float)) else "")
+        lines.append(",".join(q(c) for c in cells))
     body = "\n".join(lines) + "\n"
     return PlainTextResponse(body, media_type="text/csv", headers={
         "Content-Disposition": f"attachment; filename=\"results-{e.slug}.csv\"",

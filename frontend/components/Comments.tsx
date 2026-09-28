@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { api, fetchMe } from "@/lib/api";
+import { api, fetchMe, initials } from "@/lib/api";
 
 /** Project discussion thread. Read access follows the event's
  *  comments_visibility (public vs team-only); posting needs a login;
@@ -46,26 +46,52 @@ export default function Comments({ projectId }: { projectId: string }) {
   const staff = role === "ORGANIZER" || role === "ADMIN";
   if (!loaded) return <div className="card"><div className="skel" style={{ height: 80 }} /></div>;
   return (
-    <div className="card">
-      <h2>Discussion ({items.length})</h2>
-      {!items.length && <p style={{ color: "var(--muted)" }}>No comments yet — start the conversation.</p>}
-      {items.map((c) => (
-        <div key={c.id} style={{ padding: "8px 0", borderTop: "1px solid var(--line)" }}>
-          <b>{c.author}</b> <span style={{ color: "var(--muted)", fontSize: 13 }}>
-            {c.created_at ? new Date(c.created_at).toLocaleString() : ""}</span>
-          {c.is_hidden && <span className="badge badge-muted" style={{ marginLeft: 8 }}>Hidden</span>}
-          <p style={{ margin: "4px 0 0", whiteSpace: "pre-wrap" }}>{c.body}</p>
-          {staff && !c.is_hidden && <button className="link-btn" onClick={() => hide(c.id, true)}>Hide</button>}
-          {staff && c.is_hidden && <button className="link-btn" onClick={() => hide(c.id, false)}>Show</button>}
-        </div>
-      ))}
-      <form onSubmit={post} style={{ marginTop: 10 }}>
+    <div className="card field">
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+        <h2 style={{ margin: 0 }}>Discussion</h2>
+        <span className="badge badge-muted">{items.length} comment{items.length === 1 ? "" : "s"}</span>
+      </div>
+      {!items.length
+        ? <div className="empty" style={{ padding: "20px 12px" }}>
+            <h3>No comments yet</h3>
+            <p>{role ? "Start the conversation below." : "Log in to start the conversation."}</p>
+          </div>
+        : <div style={{ marginTop: 6 }}>
+            {items.map((c) => (
+              <div key={c.id} style={{ display: "flex", gap: 12, padding: "12px 0", borderTop: "1px solid var(--line)" }}>
+                {c.author_avatar
+                  ? <img src={c.author_avatar} alt="" width={28} height={28} style={{ borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
+                  : <span className="avatar" aria-hidden>{initials(c.author || "?")}</span>}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                    <b>{c.author}</b>
+                    <span style={{ color: "var(--muted)", fontSize: 12.5 }}>
+                      {c.created_at ? new Date(c.created_at).toLocaleString() : ""}</span>
+                    {c.is_hidden && <span className="badge badge-muted">Hidden</span>}
+                    {staff && !c.is_hidden && (
+                      <button className="link-btn" style={{ marginLeft: "auto", padding: "2px 6px" }}
+                        onClick={() => hide(c.id, true)}>Hide</button>)}
+                    {staff && c.is_hidden && (
+                      <button className="link-btn" style={{ marginLeft: "auto", padding: "2px 6px" }}
+                        onClick={() => hide(c.id, false)}>Show</button>)}
+                  </div>
+                  <p style={{ margin: "4px 0 0", whiteSpace: "pre-wrap" }}>{c.body}</p>
+                </div>
+              </div>
+            ))}
+          </div>}
+      <form onSubmit={post} style={{ marginTop: 14 }}>
         <label htmlFor={`comment-${projectId}`}>Add a comment</label>
-        <textarea id={`comment-${projectId}`} value={body} onChange={(e) => setBody(e.target.value)}
+        <textarea id={`comment-${projectId}`} rows={3} value={body}
+          onChange={(e) => setBody(e.target.value)}
           placeholder={role ? "Be kind and specific…" : "Log in to join the discussion…"}
-          disabled={!role || busy} maxLength={2000} />
+          disabled={!role || busy} maxLength={2000} style={{ resize: "vertical" }} />
         {msg && <p>{msg}</p>}
-        <button className="btn btn-sm" type="submit" disabled={!role || busy || !body.trim()}>Post comment</button>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 4 }}>
+          <button className="btn btn-sm" type="submit" disabled={!role || busy || !body.trim()}>Post comment</button>
+          {!role && <span className="form-note">You need an account to comment.</span>}
+          {role && <span className="form-note">{2000 - body.length} characters left</span>}
+        </div>
       </form>
     </div>
   );

@@ -293,8 +293,11 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
             <button className="btn" disabled={busy || stage === "OPEN" || stage === "NOT_STARTED"} onClick={calculate}
               title={stage === "OPEN" || stage === "NOT_STARTED" ? "Available once the judging deadline passes" : "Run the Crowd-BT ranking"}>
               Calculate final ranking <I.arrow /></button>
+            <a className="btn-ghost" href={`/api/export.csv?event_id=${eventId}`} download
+              title="One row per evaluation at any stage: project, team + leader, judge, every criterion score with weight and normalized share, totals, and ranks once calculated">
+              Export CSV</a>
             {(stage === "OPEN" || stage === "NOT_STARTED") && (
-              <span className="form-note" style={{ alignSelf: "center" }}>Set a judging deadline under Settings — calculation unlocks after it passes.</span>)}
+              <span className="form-note" style={{ alignSelf: "center" }}>Set a judging deadline under Settings — calculation unlocks after it passes. The CSV works at every stage.</span>)}
           </div>
           {results ? (
             <div>

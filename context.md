@@ -235,7 +235,12 @@ The platform revolves around the following core entities:
 - **Frontend** (`/judge/score/[id]`): step guidance under the buttons (save draft → complete → review → submit); Submit stays disabled until a complete draft is saved with no unsaved edits; then it opens a review `Popup` (per-criterion scores, comment, weighted total) with the **Final submit** button inside. `confirm()` is gone.
 - **Backend untouched**: draft-required/complete/immutable semantics already held; check_t2's submit/409 paths re-verified green.
 
-### 32.
+### 32. Captain-Only Submit + Invite Crash Fix (done 2026-09-26)
+**Goal**: only the team captain may finalize a submission; also fixed an invite endpoint that 500'd for everyone.
+- **Backend** (`submissions/routes.py`): `POST /submissions/{id}/submit` answers 403 unless the caller holds CAPTAIN on the team. Draft create/edit/delete stay member-level (collaborative drafting, single submitter — the Devfolio pattern). All suite submitters are team creators (captains), so no suite changes needed.
+- **Backend** (`teams/routes.py`): `POST /teams/{id}/invites` crashed with `NameError: request` (T2 commit added an audit call without the `Request` param) — added the missing parameter. Invite flow works again.
+- **Frontend** (editor Publish card): fetches the team roster, shows Submit only to the captain, members see "Only your team captain can submit".
+- **Verified live**: member submit → 403, captain submit → 200; check_t2 ALL PASS, run.py 7/7, unit 15/15.
 
 ### 33. T3 Community Voting (done 2026-09-27)
 **Goal**: organizer-opt-in public voting with quadratic budgets, gated comments, and anti-abuse that actually fires — without touching T1/T2 behavior.
@@ -257,9 +262,17 @@ The platform revolves around the following core entities:
 **Goal**: voters got no persistent "you voted" signal, and organizers had no way to see live standings before close.
 - **Voter**: the vote page now tracks server-confirmed allocations separately from local edits — a "Votes cast — X of 10 placed" badge plus per-project "✓ N votes cast", with an "unsaved changes" note when the two differ. Survives reload (state comes from the server, not memory).
 - **Organizer**: new `GET /events/{id}/voting/standings` (staff-only; 403 participant, 401 anon, all probed) sharing one `_rank_event` helper with the public results endpoint so both can never disagree. The organizer ballot view renders the live ranking with a "public results publish at close" note. The public results gate itself is untouched.
-- **Verified**: standings matrix live, check_t3 ALL PASS, run.py 7/7, unit 25/25. Captain-Only Submit + Invite Crash Fix (done 2026-09-26)
-**Goal**: only the team captain may finalize a submission; also fixed an invite endpoint that 500'd for everyone.
-- **Backend** (`submissions/routes.py`): `POST /submissions/{id}/submit` answers 403 unless the caller holds CAPTAIN on the team. Draft create/edit/delete stay member-level (collaborative drafting, single submitter — the Devfolio pattern). All suite submitters are team creators (captains), so no suite changes needed.
-- **Backend** (`teams/routes.py`): `POST /teams/{id}/invites` crashed with `NameError: request` (T2 commit added an audit call without the `Request` param) — added the missing parameter. Invite flow works again.
-- **Frontend** (editor Publish card): fetches the team roster, shows Submit only to the captain, members see "Only your team captain can submit".
-- **Verified live**: member submit → 403, captain submit → 200; check_t2 ALL PASS, run.py 7/7, unit 15/15.
+- **Verified**: standings matrix live, check_t3 ALL PASS, run.py 7/7, unit 25/25.
+
+### 36. Profile Pictures + Judge-Only UI + Full-Detail CSV (done 2026-09-27)
+**Goal**: three small professional gaps — no avatars, judges seeing participant dead-ends, and a results-only CSV.
+- **Avatars** (migration `0010_avatar`): `users.avatar_url` stores a client-resized data: URL (128px JPEG via canvas, 300KB server cap, data:image-only validation so nothing external can be smuggled in; empty clears). Shown in the header chip, settings (upload/preview/remove), and comment author rows. Public profile data by design, never auth material.
+- **Judge-only UI**: header already hid Dashboard for judges and `/dashboard` already forwarded to `/judge`; now `/teams`, `/submissions`, `/submissions/new` render a shared `JudgeGate` ("Judges don't compete" → judging console) instead of dead-end participant flows, and event cards hide Register/Submit for judge accounts (registration is 403 server-side anyway).
+- **CSV** (`GET /export.csv` reshaped): one row per evaluation at EVERY stage (drafts included, status column) — project, team, team **leader** (captain name + email), track, judge (+email), per-criterion raw score / weight% / normalized share, weighted total, plus rank/theta once a SUCCEEDED run exists (blank before). Mid-edit rubrics export with blank shares instead of 422ing. `check_t2` assertion migrated to the new shape (9 lines: header + 8 evaluations).
+- **Verified live**: avatar set/read/clear roundtrip + non-image 422; captain name+email in real export rows; run.py 7/7, check_t2 ALL PASS, unit 25/25, check_t3 ALL PASS.
+- **Follow-up**: the export had no UI entry point, so organizers couldn't find it. The judging console Results tab now has an **Export CSV** download button (plain same-origin anchor → browser download with session cookies, no fetch plumbing). Verified 200 + `text/csv` through the gateway.
+
+### 37. Comment UI Polish (done 2026-09-27)
+**Goal**: the comment composer rendered label + textarea crammed on one line (it sat outside any `.field` container, so inputs fell back to unstyled inline layout).
+- **Frontend** (`components/Comments.tsx` rewritten): proper stacked composer (full-width 3-row textarea, live character count, Post disabled until non-empty, login prompt for anonymous), comment rows with avatar initials, name + timestamp header, hidden-state badges, staff Hide/Show tucked per row, count badge header, designed empty state.
+- **Verified**: frontend build clean (typecheck + lint), project page 200.

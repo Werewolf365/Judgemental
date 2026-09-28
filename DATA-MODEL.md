@@ -4,7 +4,7 @@ Normalized Postgres (Alembic `0001_initial`). Key constraints: unique
 `users.email_norm`, `events.slug`, `(event_id, track name)`,
 `(team_id, user_id)`, `(event_id, user_id)`, `(judge_id, project_id)`.
 
-- users(id, email, email_norm unique, password_hash Argon2id, display_name, role)
+- users(id, email, email_norm unique, password_hash Argon2id, display_name, avatar_url data-URL nullable, role)
 - sessions(id, user_id, token_hash unique, expires_at, revoked_at)
 - events(id e.g. evt_01, slug unique, name, 6 nullable UTC dates, status DRAFT/PUBLISHED/COMPLETED, gallery_visibility PUBLIC/PARTICIPANTS/ORGANIZERS_ONLY default PUBLIC, created_by -> users)
 - event_organizers(event_id, user_id, assigned_by?, created_at) — who may manage an event. Creator is inserted as the first row; ADMIN bypasses per-event scoping.

@@ -260,10 +260,15 @@ check("recalculation replays identically", RUN2 != RUN1 and all(abs(a - c) < 1e-
 s, b = J(f"/events/{EV}/results/runs", O)
 check("version history keeps both runs", len(b.get("runs", [])) == 2, f"{b}")
 
-# ---- CSV ----
+# ---- CSV: one row per evaluation, full judging detail ----
 s, b = req("/export.csv?event_id=" + EV, O)
-first = b.splitlines()[0] if b.splitlines() else ""
-check("CSV exports 4 ranked rows", s == 200 and first.startswith("rank,") and len(b.splitlines()) == 5, f"got {s} {first}")
+rows = b.splitlines()
+first = rows[0] if rows else ""
+check("CSV exports 8 evaluation rows with full detail",
+      s == 200 and first.startswith("project,team,team_leader")
+      and "weighted_total" in first and "Craft [score]" in first
+      and len(rows) == 9 and all("T2 P" in r for r in rows[1:]),
+      f"got {s} {first} ({len(rows)} lines)")
 
 # ---- historical prior on a second event ----
 s, b = J("/events", O, "POST", {"name": "T2 Hist", "slug": f"t2-hist-{RUN}",

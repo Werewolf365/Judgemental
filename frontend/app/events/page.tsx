@@ -66,7 +66,7 @@ export default function Events() {
                 {loggedIn && isStaff && <span className="badge badge-track" title="Staff and judges run events rather than competing in them."><I.team /> Staff account</span>}
                 {loggedIn && !isStaff && !st?.joined && <Link href={`/events/${e.slug}`} className="btn btn-sm">Register <I.arrow /></Link>}
                 {loggedIn && !isStaff && st?.joined && <span className="badge badge-ok"><span className="pip pip-green" /> Registered</span>}
-                {loggedIn && st?.joined && st?.teamId && (
+                {loggedIn && st?.joined && st?.teamId && !isStaff && (
                   <Link href={`/submissions/new?team=${st.teamId}`} className="btn btn-sm">Submit project <I.arrow /></Link>
                 )}
                 <Link href={`/events/${e.slug}`} className="btn-ghost btn-sm">View details</Link>

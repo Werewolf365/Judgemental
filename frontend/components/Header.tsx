@@ -51,7 +51,9 @@ export default function Header() {
             ) : (
               <>
                 <Link href="/settings" className="user-chip" title={`${me.email} — account settings`} style={{ textDecoration: "none", color: "inherit" }}>
-                  <span className="avatar">{initials(me.display_name)}</span>
+                  {(me as any).avatar_url
+                    ? <img src={(me as any).avatar_url} alt="" width={28} height={28} style={{ borderRadius: "50%", objectFit: "cover" }} />
+                    : <span className="avatar">{initials(me.display_name)}</span>}
                   {me.display_name}
                   <span className="badge badge-muted">{me.role}</span>
                 </Link>

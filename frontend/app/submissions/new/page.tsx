@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { api, fetchMe } from "@/lib/api";
 import { I } from "@/components/art";
 import CustomAnswers from "@/components/CustomAnswers";
+import JudgeGate from "@/components/JudgeGate";
 
 function NewSubInner({ preselectTeam }: { preselectTeam: string }) {
   const [teams, setTeams] = useState<any[]>([]);
@@ -13,6 +14,7 @@ function NewSubInner({ preselectTeam }: { preselectTeam: string }) {
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [noTeam, setNoTeam] = useState(false);
+  const [isJudge, setIsJudge] = useState(false);
   const [eventsById, setEventsById] = useState<Record<string, any>>({});
   const [ownedByTeam, setOwnedByTeam] = useState<Record<string, any>>({});
   const router = useRouter();
@@ -25,7 +27,9 @@ function NewSubInner({ preselectTeam }: { preselectTeam: string }) {
 
   useEffect(() => {
     (async () => {
-      if (!await fetchMe()) { router.push("/login"); return; }
+      const m = await fetchMe();
+      if (!m) { router.push("/login"); return; }
+      if (m.role === "JUDGE") { setIsJudge(true); return; }
       const t = await api("/teams");
       const list = t.teams || [];
       setTeams(list);
@@ -53,6 +57,7 @@ function NewSubInner({ preselectTeam }: { preselectTeam: string }) {
     })().catch((e) => setMsg(e.message));
   }, [router, preselectTeam]);
 
+  if (isJudge) return <JudgeGate />;
   if (noTeam) return (
     <div className="card empty" style={{ maxWidth: 560, margin: "40px auto" }}>
       <h1>Join or create a team first</h1>

@@ -13,7 +13,8 @@ from app.shared.errors import err
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 def user_out(u: User) -> dict:
-    return {"id": u.id, "email": u.email, "display_name": u.display_name, "role": u.role.value if hasattr(u.role, "value") else str(u.role)}
+    return {"id": u.id, "email": u.email, "display_name": u.display_name, "role": u.role.value if hasattr(u.role, "value") else str(u.role),
+            "avatar_url": getattr(u, "avatar_url", None)}
 
 async def _create_session(db: AsyncSession, user: User, ua: str | None) -> str:
     raw = new_session_token()
@@ -87,13 +88,25 @@ async def me(user: User = Depends(current_user)):
 
 @router.patch("/me")
 async def update_me(body: dict, db: AsyncSession = Depends(get_db), user: User = Depends(current_user)):
-    name = (body.get("display_name") or "").strip()
-    if not name:
-        err(422, "validation_error", "display_name is required")
-    if len(name) > 80:
-        err(422, "validation_error", "display_name is too long")
     u = await db.get(User, user.id)
-    u.display_name = name
+    if "display_name" in body:
+        name = (body.get("display_name") or "").strip()
+        if not name:
+            err(422, "validation_error", "display_name is required")
+        if len(name) > 80:
+            err(422, "validation_error", "display_name is too long")
+        u.display_name = name
+    if "avatar_url" in body:
+        # Client-resized data: URLs only (offline-safe, no file store).
+        # Empty string clears back to initials.
+        av = body.get("avatar_url") or None
+        if av is not None:
+            av = str(av)
+            if not av.startswith("data:image/"):
+                err(422, "validation_error", "avatar must be an image upload")
+            if len(av) > 300_000:
+                err(422, "validation_error", "avatar image is too large")
+        u.avatar_url = av
     await db.commit()
     await db.refresh(u)
     return {"user": user_out(u)}

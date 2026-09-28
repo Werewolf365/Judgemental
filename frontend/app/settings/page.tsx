@@ -9,6 +9,8 @@ export default function Settings() {
   const [cur, setCur] = useState("");
   const [next, setNext] = useState("");
   const [pwMsg, setPwMsg] = useState("");
+  const [avatar, setAvatar] = useState<string | null>(null);
+  const [avatarMsg, setAvatarMsg] = useState("");
   const router = useRouter();
 
   useEffect(() => {
@@ -16,6 +18,7 @@ export default function Settings() {
       const m = await fetchMe();
       if (!m) { router.push("/login"); return; }
       setName(m.display_name);
+      setAvatar((m as any).avatar_url || null);
     })();
   }, [router]);
 
@@ -24,6 +27,39 @@ export default function Settings() {
     if (!name.trim()) { setMsg("Display name can't be empty."); return; }
     try { await api("/auth/me", { method: "PATCH", body: JSON.stringify({ display_name: name.trim() }) }); setMsg("Profile updated."); }
     catch (e: any) { setMsg(e.message); }
+  }
+
+  async function pickAvatar(e: React.ChangeEvent<HTMLInputElement>) {
+    setAvatarMsg("");
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { setAvatarMsg("Pick an image file."); return; }
+    try {
+      const bmp = await createImageBitmap(file);
+      const S = 128;
+      const scale = Math.min(1, S / Math.max(bmp.width, bmp.height));
+      const w = Math.max(1, Math.round(bmp.width * scale));
+      const h = Math.max(1, Math.round(bmp.height * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("canvas unavailable");
+      ctx.drawImage(bmp, 0, 0, w, h);
+      const url = canvas.toDataURL("image/jpeg", 0.85);
+      await api("/auth/me", { method: "PATCH", body: JSON.stringify({ avatar_url: url }) });
+      setAvatar(url);
+      setAvatarMsg("Profile picture updated.");
+    } catch (err: any) { setAvatarMsg(err.message || "Could not read that image."); }
+  }
+
+  async function clearAvatar() {
+    setAvatarMsg("");
+    try {
+      await api("/auth/me", { method: "PATCH", body: JSON.stringify({ avatar_url: "" }) });
+      setAvatar(null);
+      setAvatarMsg("Profile picture removed.");
+    } catch (e: any) { setAvatarMsg(e.message); }
   }
 
   async function savePw(e: React.FormEvent) {
@@ -41,6 +77,17 @@ export default function Settings() {
       <div className="grid grid-2">
         <form className="card field" onSubmit={saveName}>
           <h2>Profile</h2>
+          <div style={{ display: "flex", gap: 14, alignItems: "center", marginBottom: 12 }}>
+            {avatar
+              ? <img src={avatar} alt="Profile picture" width={56} height={56} style={{ borderRadius: "50%", objectFit: "cover" }} />
+              : <span className="avatar" style={{ width: 56, height: 56, fontSize: 20 }}>{(name || "?").slice(0, 2).toUpperCase()}</span>}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <label className="btn-ghost btn-sm" style={{ cursor: "pointer" }}>Upload picture
+                <input type="file" accept="image/*" onChange={pickAvatar} style={{ display: "none" }} /></label>
+              {avatar && <button type="button" className="link-btn" onClick={clearAvatar}>Remove</button>}
+            </div>
+          </div>
+          {avatarMsg && <p>{avatarMsg}</p>}
           <label>Display name</label>
           <input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} />
           {msg && <p>{msg}</p>}

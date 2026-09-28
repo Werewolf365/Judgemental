@@ -64,6 +64,7 @@ class User(Base):
     email_norm = Column(Text, nullable=False, unique=True, index=True)
     password_hash = Column(Text, nullable=False)
     display_name = Column(Text, nullable=False, default="")
+    avatar_url = Column(Text, nullable=True)
     role = Column(SAEnum(Role, name="user_role"), nullable=False, default=Role.PARTICIPANT)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
