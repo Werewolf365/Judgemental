@@ -107,6 +107,7 @@ function ParticipantHome({ me }: { me: Me }) {
   const [eventId, setEventId] = useState("");
   const [joined, setJoined] = useState<boolean | null>(null);
   const [inviteInput, setInviteInput] = useState("");
+  const [certs, setCerts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -119,6 +120,7 @@ function ParticipantHome({ me }: { me: Me }) {
         const want = new URLSearchParams(window.location.search).get("event");
         if (want && (e.events || []).some((x: any) => x.id === want)) setEventId(want);
         else if (e.events?.[0]) setEventId(e.events[0].id);
+        setCerts(((await api("/certificates/mine").catch(() => ({ certificates: [] }))).certificates || []));
       } catch (e: any) { setMsg(e.message); }
       finally { setLoading(false); }
     })();
@@ -255,6 +257,21 @@ function ParticipantHome({ me }: { me: Me }) {
             </>
           )}
         </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <h2>My certificates</h2>
+        {!certs.length && <p style={{ color: "var(--muted)" }}>No event registrations yet — certificates unlock here once results are declared.</p>}
+        {certs.map((c: any) => (
+          <div key={c.event_id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "10px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>
+            <div><b>{c.event_name}</b>
+              <div style={{ fontSize: 13, color: "var(--muted)" }}>
+                {c.declared ? (c.kind === "WINNER" ? "Winner" : "Participation") : "Results not declared yet"}</div></div>
+            {c.declared
+              ? <Link href={`/certificates/${c.event_id}`} className="btn-ghost btn-sm" style={{ marginLeft: "auto" }}>View certificate</Link>
+              : <span className="badge badge-muted" style={{ marginLeft: "auto" }}>Pending</span>}
+          </div>
+        ))}
       </div>
     </div>
   );

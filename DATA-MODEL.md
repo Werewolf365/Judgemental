@@ -51,3 +51,10 @@ T3 voting (migration `0009_voting`):
 - events += voting_enabled bool default false, voting_close nullable UTC, voting_mode text default 'auth' (auth/email/open), comments_visibility text default 'public' (public/team)
 - ballots(id, event_id, voter_key, project_id, votes int, fp_hash?, created_at/updated_at) + unique (event_id, voter_key, project_id); voter_key is `user:<id>`, `email:<addr>` or `anon:<uuid>`
 - comments(id, event_id, project_id, author_user_id, body ≤2000, is_hidden, created_at) — hidden, never deleted
+
+T4 certificates (migration `0019_certificates`):
+
+- certificate_templates(id, event_id unique, image data: URL ≤2MB, updated_by?, created_at/updated_at) — organizer-uploaded base; participant details overlay at render
+- certificates(id, event_id, user_id, kind WINNER/PARTICIPATION, project_id?, team_name?, rank?, code unique, issued_at) + unique (event_id, user_id) — issued lazily on first view after results declared; WINNER = rank-1 team member (blended-aware order)
+
+T4 bulk transfer is stateless (no tables): `GET /events/{id}/export` (ZIP of 14 CSVs) and `POST /events/{id}/import` (create-only tracks/prizes/rubric/judges/organizers), both organizer-only and event-scoped.

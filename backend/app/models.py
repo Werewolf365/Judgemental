@@ -554,3 +554,36 @@ class Comment(Base):
     body = Column(Text, nullable=False)
     is_hidden = Column(Boolean, nullable=False, default=False, server_default="false")
     created_at = Column(DateTime(timezone=True), default=utcnow)
+
+class CertificateKind(enum.Enum):
+    WINNER = "WINNER"
+    PARTICIPATION = "PARTICIPATION"
+
+class CertificateTemplate(Base):
+    """Organizer-uploaded certificate base image per event (data: URL, like
+    avatars — no file store, no new service, works offline). Participant
+    details are overlaid at render time; the template itself holds no PII."""
+    __tablename__ = "certificate_templates"
+    id = Column(Text, primary_key=True, default=_uuid)
+    event_id = Column(Text, ForeignKey("events.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    image = Column(Text, nullable=False)
+    updated_by = Column(Text, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+class Certificate(Base):
+    """Issued certificate row. Created lazily on first view (idempotent),
+    only once results are declared (a SUCCEEDED run exists). code is the
+    verification token shown on the certificate. WINNER = member of the
+    rank-1 team (blended-aware order); everyone else PARTICIPATION."""
+    __tablename__ = "certificates"
+    __table_args__ = (UniqueConstraint("event_id", "user_id", name="uq_cert_event_user"),)
+    id = Column(Text, primary_key=True, default=_uuid)
+    event_id = Column(Text, ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind = Column(SAEnum(CertificateKind, name="certificate_kind"), nullable=False)
+    project_id = Column(Text, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
+    team_name = Column(Text, nullable=True)
+    rank = Column(Integer, nullable=True)
+    code = Column(Text, nullable=False, unique=True, index=True)
+    issued_at = Column(DateTime(timezone=True), default=utcnow)

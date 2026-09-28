@@ -6,6 +6,7 @@ import { ZONES, wallToUTC, utcToWall } from "@/lib/tz";
 import { I } from "@/components/art";
 import DateTimePicker from "@/components/DateTimePicker";
 import JudgingPanel from "@/components/JudgingPanel";
+import Transfer from "@/components/Transfer";
 import Popup from "@/components/Popup";
 
 const STEPS = [
@@ -55,6 +56,7 @@ function Console() {
   const [subFilter, setSubFilter] = useState("");
   const [people, setPeople] = useState<any[]>([]);
   const [reviewTab, setReviewTab] = useState<"submissions" | "people" | "team">("submissions");
+  const [showTransfer, setShowTransfer] = useState(false);
   const [orgs, setOrgs] = useState<any[]>([]);
   const [orgEmail, setOrgEmail] = useState("");
   const [formFields, setFormFields] = useState<any[]>([]);
@@ -122,6 +124,31 @@ function Console() {
     try {
       const d = await api(`/events/${detail.event.id}/audit?q=${encodeURIComponent(auditQ)}&limit=100`);
       setAudit(d.entries || []);
+    } catch (e: any) { setMsg(e.message); }
+  }
+
+  // Certificate base image (organizer-uploaded; participant details overlay it).
+  const [certTpl, setCertTpl] = useState(false);
+  useEffect(() => {
+    if (!detail?.event?.id) { setCertTpl(false); return; }
+    api(`/events/${detail.event.id}/certificate-template`).then(() => setCertTpl(true)).catch(() => setCertTpl(false));
+  }, [detail?.event?.id]);
+  async function uploadTemplate(file: File | undefined) {
+    if (!file || !detail) return;
+    setMsg("");
+    if (!file.type.startsWith("image/")) { setMsg("Template must be an image file."); return; }
+    if (file.size > 2_000_000) { setMsg("Template image too large (2MB cap)."); return; }
+    try {
+      const dataUrl = await new Promise<string>((res, rej) => {
+        const fr = new FileReader();
+        fr.onload = () => res(String(fr.result));
+        fr.onerror = rej;
+        fr.readAsDataURL(file);
+      });
+      await api(`/events/${detail.event.id}/certificate-template`,
+        { method: "PUT", body: JSON.stringify({ image: dataUrl }) });
+      setCertTpl(true);
+      setMsg("Certificate template saved — issued automatically once results are declared.");
     } catch (e: any) { setMsg(e.message); }
   }
 
@@ -507,6 +534,18 @@ function Console() {
               <a className="btn-ghost btn-sm" href={`/events/${ev.slug || ev.id}`}>Preview event page</a>
               {ev.status === "PUBLISHED" && <a className="btn-ghost btn-sm" href={`/events/${ev.slug || ev.id}/projects`}>View gallery</a>}
             </div>
+            <h3 style={{ marginTop: 16 }}>Certificates</h3>
+            <p style={{ color: "var(--muted)", marginTop: 0 }}>
+              Upload the certificate base — participant name, event, rank and code overlay it.
+              Issued automatically once results are declared (winner = rank-1 team).</p>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <label className="btn-ghost btn-sm" style={{ cursor: "pointer" }}>
+                {certTpl ? "Replace base image…" : "Upload base image…"}
+                <input type="file" accept="image/*" hidden
+                  onChange={(e) => { uploadTemplate(e.target.files?.[0]); e.target.value = ""; }} />
+              </label>
+              {certTpl && <span className="badge badge-ok">Base uploaded</span>}
+            </div>
             <div style={{ marginTop: 14 }}>
               <button className="btn-ghost btn-sm" onClick={() => goStep("gallery")}><I.back /> Back to gallery access</button>{" "}
               <button className="btn btn-sm" onClick={() => goStep("voting")}>Continue to voting <I.arrow /></button>
@@ -585,8 +624,10 @@ function Console() {
             <button className={reviewTab === "submissions" ? "on" : ""} onClick={() => { setReviewTab("submissions"); loadReview(ev.id); }}>Submissions ({subs.length})</button>
             <button className={reviewTab === "people" ? "on" : ""} onClick={() => { setReviewTab("people"); loadReview(ev.id); }}>Participants ({people.length})</button>
             <button className={reviewTab === "team" ? "on" : ""} onClick={() => { setReviewTab("team"); loadReview(ev.id); }}>Organizers ({orgs.length})</button>
-            <button className="btn-ghost btn-sm" style={{ marginLeft: "auto" }} onClick={() => loadReview(ev.id)}>Refresh</button>
+            <button className="btn-ghost btn-sm" style={{ marginLeft: "auto" }} onClick={() => setShowTransfer(true)}>Import / Export</button>
+            <button className="btn-ghost btn-sm" onClick={() => loadReview(ev.id)}>Refresh</button>
           </div>
+          {showTransfer && <Transfer eventId={ev.id} onClose={() => setShowTransfer(false)} />}
           {reviewTab === "submissions" && (
             <div>
               <select value={subFilter} onChange={(e) => setSubFilter(e.target.value)} style={{ maxWidth: 220 }}>
