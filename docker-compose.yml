@@ -22,6 +22,11 @@ services:
       # Background judge-assignment sweep, seconds between ticks.
       # 180 = 3 min testing cadence. Production wants 1800 (30 min).
       AUTO_ASSIGN_EVERY_SECONDS: "180"
+      # Anti-abuse budgets (code defaults shown; lower for strict deployments).
+      VOTE_PER_MIN: "30"
+      COMMENT_PER_MIN: "20"
+      LOGIN_PER_MIN: "30"
+      REGISTER_PER_HOUR: "100"
     volumes:
       - ./fixtures.json:/fixtures/fixtures.json:ro
     depends_on:

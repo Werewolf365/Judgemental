@@ -49,6 +49,17 @@ def is_published(event: Event) -> bool:
     return st == "PUBLISHED"
 
 
+def require_commentable(project: Project, user) -> None:
+    """Comments live on votable work. Staff bypass; everyone else gets the
+    same 404 as a missing project, so hidden/draft ids are not oracle-able
+    through the thread endpoints."""
+    if is_staff(user):
+        return
+    st = project.status.value if hasattr(project.status, "value") else str(project.status)
+    if st != "SUBMITTED" or not project.is_visible:
+        err(404, "not_found", "Project not found")
+
+
 def require_live_or_staff(event: Event, user) -> None:
     """Drafts are staff-only across the whole voting surface (same rule as
     the gallery): the public never sees draft ballots, casts, or results."""

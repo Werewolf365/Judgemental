@@ -52,6 +52,36 @@ immediately viewable in the UI:
 - `demo-vote` — 5 projects, 4 voters with varied ballots, visible comment
   thread, window closed, public tally P1>P2>P3>P5>P4.
 
+## Anti-abuse (T3 voting) + pen test
+
+Full model: [`SECURITY_MODEL.md`](SECURITY_MODEL.md).
+
+Rate limits (per-minute token buckets, refusals audited), quadratic vote
+budgets, own-team block, UUID/email voter identity, fingerprint-collision
+turnout signals, and an organizer-readable event audit
+(`GET /events/{id}/audit` — no database client needed).
+
+`python scripts/pen_test_abuse.py` attacks a throwaway probe event across
+34 checks: budget overruns (including a concurrent double-spend race),
+bad/negative identities, cross-event, draft and hidden targets, own-team
+votes, pre-close tally pulls, comment abuse plus identical-repost spam, and
+ballot/comment/register/login floods with and without spoofed
+`X-Forwarded-For` — then verifies every refusal lands in the organizer's
+(or admin's) audit view. Clean up after with `clean_probes.py`.
+
+Fixed along the way: comment floods now carry the real event id into the
+audit (previously invisible to organizers), comments on draft/hidden
+projects 404 for non-staff, IP attribution uses the gateway-seen address,
+ballot writes serialize per voter, and register/login are throttled
+(`REGISTER_PER_HOUR` 100, `LOGIN_PER_MIN` 30 — tunable in
+docker-compose.yml).
+
+Known accepted risks (by design, not oversights): email mode trusts
+self-asserted addresses (no mail infra to verify), open mode is Sybil-able
+by design (UUIDs are friction, fingerprints are advisory signals),
+auth-mode Sybil is slowed — not stopped — by the register throttle, and
+NAT-shared IPs share one bucket (generous by choice).
+
 ## Cleaning test-probe clutter
 
 `check_t1/t2/t3.py` leave per-run probe events + users behind

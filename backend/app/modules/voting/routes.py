@@ -43,12 +43,17 @@ router = APIRouter(tags=["voting"])
 
 
 def _ip(request: Request | None) -> str:
-    """Left-most X-Forwarded-For (what nginx sets) else direct peer.
-    Attribution only — spoofable past the gateway, never authentication."""
+    """Right-most X-Forwarded-For (what the bundled nginx saw) else direct
+    peer. The gateway appends the real client, so the last entry is the only
+    one a client cannot spoof past it; the left-most is attacker-controlled
+    whenever anything reaches the API directly. Attribution only — never
+    authentication."""
     if request is not None:
         fwd = request.headers.get("x-forwarded-for")
-        if fwd and fwd.split(",")[0].strip():
-            return fwd.split(",")[0].strip()
+        if fwd:
+            parts = [p.strip() for p in fwd.split(",") if p.strip()]
+            if parts:
+                return parts[-1]
         if request.client:
             return request.client.host
     return "unknown"
@@ -132,9 +137,11 @@ async def event_audit(event_id: str, action: str = Query("", max_length=80),
     if action.strip():
         where.append(AuditLog.action == action.strip())
     if q.strip():
-        like = f"%{q.strip()}%"
-        where.append(AuditLog.action.ilike(like) | AuditLog.actor_email.ilike(like)
-                     | AuditLog.target_id.ilike(like))
+        # Escape LIKE wildcards: a search box must match literally, and an
+        # organizer probing with % should not widen their own view.
+        like = "%" + q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        where.append(AuditLog.action.ilike(like, escape="\\") | AuditLog.actor_email.ilike(like, escape="\\")
+                     | AuditLog.target_id.ilike(like, escape="\\"))
     rows = (await db.execute(select(AuditLog).where(*where).order_by(
         AuditLog.created_at.desc(), AuditLog.id.desc()).limit(limit))).scalars().all()
     return {"entries": [{
@@ -196,6 +203,11 @@ async def cast_ballot(slug: str, body: BallotIn, request: Request,
         err(403, "forbidden", reason or "voting is not open")
     key = service.voter_key_for(e, user, body.email, body.voter_id)
     await _limited(request, user, "vote", "vote.rate_limited", e.id)
+    # Per-voter write serialization: budget pricing is check-then-act, so
+    # two concurrent casts from one voter could both pass and land over
+    # budget. The xact lock is held until commit and costs nothing when
+    # uncontended.
+    await db.execute(select(func.pg_advisory_xact_lock(func.hashtext(key))))
     p = await db.get(Project, body.project_id)
     if (not p or p.event_id != e.id
             or (p.status.value if hasattr(p.status, "value") else str(p.status)) != "SUBMITTED"
@@ -310,6 +322,7 @@ async def list_comments(project_id: str, db: AsyncSession = Depends(get_db),
     if not e:
         err(404, "not_found", "Project not found")
     service.require_live_or_staff(e, user)
+    service.require_commentable(p, user)
     if not await _can_read_comments(db, e, p, user):
         err(403, "forbidden",
             "comments on this project are visible to its team and organizers only")
@@ -335,7 +348,6 @@ async def post_comment(project_id: str, body: CommentIn, request: Request,
     text = body.body.strip()
     if not text:
         err(422, "validation_error", "comment cannot be empty")
-    await _limited(request, user, "comment", "comment.rate_limited", "")
     p = await db.get(Project, project_id)
     if not p:
         err(404, "not_found", "Project not found")
@@ -343,6 +355,25 @@ async def post_comment(project_id: str, body: CommentIn, request: Request,
     if not e:
         err(404, "not_found", "Project not found")
     service.require_live_or_staff(e, user)
+    service.require_commentable(p, user)
+    # Duplicate reposts (scripted spam or double-submits) are refused: same
+    # author, project and body within ten minutes. Audited distinctly so
+    # organizers can tell floods from repeats.
+    from datetime import timedelta as _td
+    dup = await db.execute(select(Comment.id).where(
+        Comment.project_id == p.id, Comment.author_user_id == user.id,
+        Comment.body == text,
+        Comment.created_at > utcnow() - _td(minutes=10)))
+    if dup.scalar_one_or_none():
+        await record(user, "comment.duplicate", target_type="project",
+                     target_id=p.id, event_id=p.event_id, request=request)
+        err(429, "rate_limited",
+            "identical comment posted recently — wait a little")
+    # Limited AFTER the project resolves so the refusal audit row carries
+    # the real event_id — otherwise organizers never see comment floods in
+    # their event-scoped audit view. The 404s above are identical, so this
+    # ordering leaks nothing new.
+    await _limited(request, user, "comment", "comment.rate_limited", p.event_id)
     import uuid as _uuid
     c = Comment(id=f"cmt_{_uuid.uuid4().hex[:8]}", event_id=p.event_id,
                 project_id=p.id, author_user_id=user.id, body=text[:2000])

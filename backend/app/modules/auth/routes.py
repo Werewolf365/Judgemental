@@ -40,8 +40,36 @@ def _cookie(resp: Response, raw: str):
     resp.set_cookie(SESSION_COOKIE, raw, httponly=True, samesite="lax",
                     secure=secure, path="/", max_age=SESSION_DAYS * 86400)
 
+def _ip(request: Request | None) -> str:
+    """Right-most X-Forwarded-For (what the bundled nginx saw) else direct
+    peer — same rule as voting/routes._ip. Attribution only."""
+    if request is not None:
+        fwd = request.headers.get("x-forwarded-for")
+        if fwd:
+            parts = [p.strip() for p in fwd.split(",") if p.strip()]
+            if parts:
+                return parts[-1]
+        if request.client:
+            return request.client.host
+    return "unknown"
+
+
+async def _limited(request: Request, route: str, action: str) -> None:
+    """Auth-surface gate. Runs before any existence check so responses leak
+    nothing new, and refusals are audited for the admin trail."""
+    from app.modules.voting import ratelimit
+    ok, retry = ratelimit.check(_ip(request), route)
+    if not ok:
+        await record(None, action, detail={"route": route}, request=request)
+        err(429, "rate_limited",
+            f"too many requests — try again in {retry}s")
+
 @router.post("/register")
 async def register(body: RegisterIn, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
+    # Mass registration is the Sybil front door to auth-mode voting (every
+    # account is a fresh user:<id> budget with no team to block), so account
+    # creation is throttled per IP. Tunable via REGISTER_PER_HOUR.
+    await _limited(request, "register", "auth.register_rate_limited")
     email = body.email.strip()
     norm = email.lower()
     ex = await db.execute(select(User).where(User.email_norm == norm))
@@ -63,6 +91,9 @@ async def register(body: RegisterIn, request: Request, response: Response, db: A
 
 @router.post("/login")
 async def login(body: LoginIn, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
+    # Credential-stuffing backstop (Argon2 already makes each guess
+    # expensive). Runs before the lookup so timing leaks nothing.
+    await _limited(request, "login", "auth.login_rate_limited")
     norm = body.email.strip().lower()
     ex = await db.execute(select(User).where(User.email_norm == norm))
     u = ex.scalar_one_or_none()

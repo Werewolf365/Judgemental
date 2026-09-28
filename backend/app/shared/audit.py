@@ -43,18 +43,19 @@ def _client_ip(request):
     """Best-effort client address.
 
     Behind the bundled nginx gateway `request.client.host` is the proxy's own
-    address, so prefer the left-most X-Forwarded-For entry, which nginx sets to
-    the original client. That header is trivially spoofable by anything that
-    reaches the API directly, so treat this as attribution, never as
-    authentication.
+    address, so X-Forwarded-For is used — specifically the RIGHT-most entry,
+    which is the address nginx itself saw (it appends the real client). The
+    left-most entry is attacker-controlled whenever anything reaches the API
+    directly, so it must never be trusted. Treat this as attribution, never
+    as authentication.
     """
     if request is None:
         return None
     forwarded = request.headers.get("x-forwarded-for") if hasattr(request, "headers") else None
     if forwarded:
-        first = forwarded.split(",")[0].strip()
-        if first:
-            return _clean(first, 64)
+        parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+        if parts:
+            return _clean(parts[-1], 64)
     client = getattr(request, "client", None)
     return _clean(client.host if client else None, 64)
 
