@@ -17,8 +17,11 @@ Pipeline:
       -> per-criterion normalization to a common 0..1 scale
       -> organizer-weighted total (weights normalized to sum 1)
       -> x10 back to the familiar 0..10 display scale
-      -> empirical-Bayes Gaussian fit (closed-form MAP + exact posterior
-         covariance — the model is linear-Gaussian, so no optimizer is needed)
+      -> EM-estimated variance components (noise from within-project
+         residuals, the only place it is observed; weak prior toward small
+         noise since rubric-quantized human noise is bounded) + exact
+         Gaussian posterior (closed-form MAP — the model is linear-Gaussian,
+         so no optimizer is needed)
       -> posterior sampling (seeded, deterministic) for ranking uncertainty
       -> plain-language Top-K summary (no raw statistics in default fields).
 
@@ -29,7 +32,7 @@ Only numpy is required (no scipy).
 import hashlib
 import math
 
-MODEL_VERSION = "hier-bayes-score-v1"
+MODEL_VERSION = "hier-bayes-score-v2"
 
 # Score scale judges write against (judge.py SCORE_MIN/SCORE_MAX). Normalization
 # divides by this range, so criteria on any future scale map to 0..1 first.
@@ -47,6 +50,21 @@ N_SAMPLES = 4000
 
 # "1224" competition-rank tie tolerance (same convention as crowd_bt.rank).
 TIE_EPS = 1e-9
+
+# EM estimation of the variance components (v2): rounds, tolerance, and the
+# weak noise prior. The prior pulls sigma^2 toward ~1pt^2 with weight 2 —
+# rubric-quantized human noise is bounded (a typical ±2pt swing), so a noise
+# estimate far above that is the estimator fooling itself, not the data.
+# At pure jpp=1 noise vs quality is genuinely unidentifiable, and this prior
+# is the stated convention that breaks the tie (toward trusting the scores).
+EM_ROUNDS = 10
+EM_TOL = 1e-4
+SIGMA2_PRIOR_NU0 = 2.0
+SIGMA2_PRIOR_S02 = 1.0
+
+# Noise-share flag: when the noise component claims more than this fraction
+# of total spread, the run config says so in plain language.
+NOISE_SHARE_FLAG = 0.8
 
 # Confidence bands on the probability that a project's displayed position is
 # right. Conservative on purpose: a High means "safe to announce".
@@ -136,36 +154,7 @@ def fit(observations: list, *, seed: int = 0, n_samples: int = N_SAMPLES,
 
     mu = float(np.mean(y))
 
-    # --- Empirical-Bayes variance components (method of moments). ---
-    # sigma^2 from pooled within-judge variance. This OVERestimates pure noise
-    # (it also contains project differences within a judge), i.e. posteriors
-    # are conservative — wider, never narrower, than the data strictly implies.
-    judge_means = np.array([y[jj == j].mean() for j in range(J)])
-    judge_ns = np.array([(jj == j).sum() for j in range(J)])
-    ss_within = sum(float(np.sum((y[jj == j] - judge_means[j]) ** 2)) for j in range(J))
-    dof = max(1, n - J)
-    sigma2 = max(ss_within / dof, MIN_VAR)
-    avg_n = n / J
-    if J > 1:
-        # Replication adjustment: a judge seen once provides no replication to
-        # separate their severity from project quality (exactly confounded),
-        # so severity variance scales with (nbar-1)/nbar — full shrinkage to
-        # the prior at nbar=1, the plain method-of-moments estimate as
-        # replication grows. Without this, single-evaluation judges would
-        # absorb project-quality spread into huge spurious severity effects.
-        rep = max(0.0, (avg_n - 1.0) / avg_n)
-        tau2 = max((float(np.var(judge_means, ddof=1)) - sigma2 / avg_n) * rep,
-                   MIN_VAR)
-    else:
-        # One judge total: no severity variation is estimable, b -> 0, and the
-        # ranking reduces to (shrunk) score order. Honest, not degenerate.
-        tau2 = MIN_VAR
-    vtot = float(np.var(y, ddof=1)) if n > 1 else MIN_VAR
-    s2 = max(vtot - tau2 - sigma2, MIN_VAR)
-
-    # --- Closed-form Gaussian posterior. beta = [theta(P), b(J)]. ---
-    # Q beta = c with Q = A'A/sigma^2 + diag(1/s^2, 1/tau^2); Cov = Q^-1.
-    # Linear-Gaussian => exact, no optimizer, no convergence failure mode.
+    # --- Design products (hypers-independent; built once). ---
     dim = P + J
     XtX = np.zeros((dim, dim))
     Xty = np.zeros(dim)
@@ -175,20 +164,130 @@ def fit(observations: list, *, seed: int = 0, n_samples: int = N_SAMPLES,
     np.add.at(XtX, (P + jj, pj), 1.0)
     np.add.at(Xty, pj, y)
     np.add.at(Xty, P + jj, y)
-    Q = XtX / sigma2
-    Q[np.arange(P), np.arange(P)] += 1.0 / s2
-    Q[np.arange(P, dim), np.arange(P, dim)] += 1.0 / tau2
-    c = Xty / sigma2
-    c[:P] += mu / s2
-    try:
-        beta = np.linalg.solve(Q, c)
-        cov = np.linalg.inv(Q)
-    except Exception:
-        # Numerically singular (e.g. duplicate columns): tiny jitter on the
-        # diagonal, still symmetric positive definite. Documented fallback.
-        Q = Q + np.eye(dim) * 1e-6
-        beta = np.linalg.solve(Q, c)
-        cov = np.linalg.inv(Q)
+    eye = np.eye(dim)
+    arP = np.arange(P)
+    arJ = np.arange(P, dim)
+
+    def _solve(s2_, tau2_, sigma2_):
+        """Closed-form Gaussian posterior at given hypers.
+
+        Q beta = c with Q = A'A/sigma^2 + diag(1/s^2, 1/tau^2); Cov = Q^-1.
+        Linear-Gaussian => exact, no optimizer, no convergence failure mode.
+        Returns (beta, cov, logdetQ); logdetQ feeds the marginal-likelihood
+        guard for the EM best-hypers selection.
+        """
+        Q = XtX / sigma2_
+        Q[arP, arP] += 1.0 / s2_
+        Q[arJ, arJ] += 1.0 / tau2_
+        c = Xty / sigma2_
+        c = c.copy()
+        c[:P] += mu / s2_
+        try:
+            beta = np.linalg.solve(Q, c)
+            cov = np.linalg.inv(Q)
+            sign, logdet = np.linalg.slogdet(Q)
+            logdet = float(logdet) if sign > 0 else float("inf")
+        except Exception:
+            # Numerically singular (e.g. duplicate columns): tiny jitter on
+            # the diagonal, still symmetric positive definite.
+            Q = Q + eye * 1e-6
+            beta = np.linalg.solve(Q, c)
+            cov = np.linalg.inv(Q)
+            sign, logdet = np.linalg.slogdet(Q)
+            logdet = float(logdet) if sign > 0 else float("inf")
+        return beta, cov, logdet
+
+    def _neg_marginal(beta, logdet, s2_, tau2_, sigma2_):
+        """Negative log marginal likelihood log p(y | hypers).
+
+        logdet(V) = n log s^2 + P log s2 + J log tau2 + logdet(Q) by the
+        matrix determinant lemma; the quadratic form decomposes exactly at
+        the posterior mean (standard linear-Gaussian identity).
+        """
+        resid = (y - mu) - ((beta[:P] - mu)[pj] + beta[P + jj])
+        quad = (float(resid @ resid) / sigma2_
+                + float(np.sum((beta[:P] - mu) ** 2)) / s2_
+                + float(np.sum(beta[P:] ** 2)) / tau2_)
+        return 0.5 * (n * math.log(2 * math.pi) + n * math.log(sigma2_)
+                      + P * math.log(s2_) + J * math.log(tau2_)
+                      + logdet + quad)
+
+    # --- Initial hypers: one-shot method of moments. ---
+    # Good enough to start EM, but NOT the answer: sigma^2 from pooled
+    # within-judge variance books project differences as noise (at jpp=2
+    # this once estimated true noise 0.09 as 6.6 and zeroed all signal).
+    judge_means = np.array([y[jj == j].mean() for j in range(J)])
+    judge_ns = np.array([(jj == j).sum() for j in range(J)])
+    ss_within = sum(float(np.sum((y[jj == j] - judge_means[j]) ** 2)) for j in range(J))
+    dof = max(1, n - J)
+    sigma2 = max(ss_within / dof, MIN_VAR)
+    avg_n = n / J
+    rep = max(0.0, (avg_n - 1.0) / avg_n) if J > 1 else 0.0
+    if J > 1:
+        # Replication adjustment: a judge seen once provides no replication
+        # to separate their severity from project quality (exactly
+        # confounded), so severity variance scales with (nbar-1)/nbar — full
+        # shrinkage to the prior at nbar=1, the plain method-of-moments
+        # estimate as replication grows.
+        tau2 = max((float(np.var(judge_means, ddof=1)) - sigma2 / avg_n) * rep,
+                   MIN_VAR)
+    else:
+        # One judge total: no severity variation is estimable, b -> 0, and
+        # the ranking reduces to (shrunk) score order. Honest, not degenerate.
+        tau2 = MIN_VAR
+    vtot = float(np.var(y, ddof=1)) if n > 1 else MIN_VAR
+    s2 = max(vtot - tau2 - sigma2, MIN_VAR)
+
+    # --- EM on the variance components. ---
+    # E-step: posterior (theta, b) at current hypers (unchanged closed form).
+    # M-step: sigma^2 from WITHIN-PROJECT residuals — same project, different
+    # judges is the only place noise is actually observed — plus the weak
+    # prior above; s2/tau^2 from posterior spread plus posterior variance
+    # (the trace terms EM owes the M-step; dropping them underestimates).
+    # Best-marginal-likelihood hypers are kept as a guard against a bad last
+    # step. Deterministic: no RNG anywhere in this loop.
+    # Pure-jpp=1 gate: with zero within-project replication EM has nothing
+    # to separate noise from quality either (one observation per cell), so
+    # the M-step would be trace-plus-prior artifact. That regime keeps the
+    # legacy one-shot convention exactly (sigma^2 floored, spread trusted)
+    # rather than a new arbitrary number.
+    from collections import Counter as _Counter
+    has_replication = any(c >= 2 for c in _Counter(int(x) for x in pj).values())
+    best = (s2, tau2, sigma2)
+    beta, cov, logdet = _solve(s2, tau2, sigma2)
+    best_nlp = _neg_marginal(beta, logdet, s2, tau2, sigma2)
+    em_rounds = 0
+    if has_replication:
+        for _ in range(EM_ROUNDS):
+            th = beta[:P]
+            bb = beta[P:]
+            var_th = np.maximum(np.diag(cov)[:P], 0.0)
+            var_b = np.maximum(np.diag(cov)[P:], 0.0)
+            resid = y - (th[pj] + bb[jj])
+            var_sum = var_th[pj] + var_b[jj] + 2.0 * cov[pj, P + jj]
+            ss_noise = float(np.sum(resid ** 2 + np.maximum(var_sum, 0.0)))
+            new_sigma2 = max((ss_noise + SIGMA2_PRIOR_NU0 * SIGMA2_PRIOR_S02)
+                             / (n + SIGMA2_PRIOR_NU0), MIN_VAR)
+            new_s2 = max((float(np.sum((th - mu) ** 2)) + float(np.sum(var_th))) / P,
+                         MIN_VAR)
+            if J > 1:
+                new_tau2 = max(((float(np.sum(bb ** 2)) + float(np.sum(var_b))) / J) * rep,
+                               MIN_VAR)
+            else:
+                new_tau2 = MIN_VAR
+            change = max(abs(new_s2 - s2) / s2, abs(new_tau2 - tau2) / tau2,
+                         abs(new_sigma2 - sigma2) / sigma2)
+            s2, tau2, sigma2 = new_s2, new_tau2, new_sigma2
+            beta, cov, logdet = _solve(s2, tau2, sigma2)
+            em_rounds += 1
+            nlp = _neg_marginal(beta, logdet, s2, tau2, sigma2)
+            if nlp < best_nlp:
+                best_nlp = nlp
+                best = (s2, tau2, sigma2)
+            if change < EM_TOL:
+                break
+    s2, tau2, sigma2 = best
+    beta, cov, _ = _solve(s2, tau2, sigma2)
     se = np.sqrt(np.maximum(np.diag(cov), 1e-12))
 
     theta_mean = beta[:P]
@@ -288,6 +387,8 @@ def fit(observations: list, *, seed: int = 0, n_samples: int = N_SAMPLES,
         "top_k": K,
         "hypers": {"mu": round(mu, 4), "sigma2": round(float(sigma2), 4),
                    "tau2": round(float(tau2), 4), "s2": round(float(s2), 4)},
+        "variance": _variance_diagnosis(float(s2), float(tau2),
+                                        float(sigma2), em_rounds),
         "theta_mean": {p: float(theta_mean[pdx[p]]) for p in projects},
         "theta_sd": {p: float(theta_sd[pdx[p]]) for p in projects},
         "judge_effects": {j: {"b_mean": float(b_mean[jdx[j]]),
@@ -297,6 +398,27 @@ def fit(observations: list, *, seed: int = 0, n_samples: int = N_SAMPLES,
         "seed": int(seed) % (2 ** 31),
         "n_samples": int(n_samples),
     }
+
+
+def _variance_diagnosis(s2: float, tau2: float, sigma2: float,
+                        em_rounds: int) -> dict:
+    """Variance-component shares for the run config, with a plain-language
+    flag when noise claims the bulk of total spread (ranking certainty then
+    limited no matter what the means say)."""
+    tot = s2 + tau2 + sigma2
+    shares = {"project": s2 / tot, "judge": tau2 / tot, "noise": sigma2 / tot}
+    dominated = shares["noise"] > NOISE_SHARE_FLAG
+    if dominated:
+        note = ("Scores vary mostly within judges rather than between "
+                "projects — ranking certainty limited. Extra judging on the "
+                "close calls buys the most information.")
+    else:
+        note = ("Variance split looks usable: project differences explain "
+                "most of the spread.")
+    return {"shares": {k: round(v, 4) for k, v in shares.items()},
+            "noise_dominated": dominated,
+            "note": note,
+            "em_rounds": int(em_rounds)}
 
 
 def recommend_extra_judging(fit_out: dict, *, max_pairs: int = 5) -> list:

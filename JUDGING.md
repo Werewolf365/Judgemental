@@ -209,8 +209,17 @@ score, likely range, Top-K chance, High/Medium/Low confidence, close calls
 ("A is 72% likely to rank above B"), judge-severity notes, and prioritized
 extra-judging recommendations with a suggested judge each. Reopen the window,
 assign, score, close, recalculate — a new versioned run, history kept.
-Version `hier-bayes-score-v1`, tables `bayes_project_results` /
+Version `hier-bayes-score-v2`, tables `bayes_project_results` /
 `bayes_judge_effects`, code `modules/judging/{hier_score,bayes}.py`.
+Variance components are EM-estimated (noise from within-project residuals —
+same project, different judges — with a weak prior toward small noise;
+project/judge variance from posterior spread plus posterior variance; best
+marginal-likelihood hypers kept as a guard; deterministic). Pure single-judge
+data (no project scored twice) keeps the legacy one-shot convention exactly,
+since noise vs quality is unidentifiable there by construction. Each run's
+config records the variance shares plus a plain-language flag when noise
+claims >80% of total spread ("scores vary mostly within judges — ranking
+certainty limited").
 
 When the model flags a close call as uncertain, the organizer — not the model —
 has the last word, all inside the Uncertainty tab. The tab itself is shown

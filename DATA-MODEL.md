@@ -40,7 +40,7 @@ The fixture `judges`/`scores`/`judge_tracks` tables stay as seeded legacy):
 - pairwise_observations(id, model_run_id, judge_user_id, winner/loser project_id, weight CHECK = 1, source_evaluation_ids JSON)
 
 T2b Bayesian scoring edge case (migration `0011_bayes_score`; shares `model_runs`,
-distinguished by `model_version = hier-bayes-score-v1`):
+distinguished by `model_version = hier-bayes-score-v2` (v1 rows remain readable):
 
 - bayes_project_results(model_run_id, project_id, score_mean/sd/lo/hi, rank, p_top_k, confidence High/Medium/Low)
 - bayes_judge_effects(model_run_id, judge_user_id, b_mean/sd, n_evaluations) — posterior severity/leniency, shrunk toward 0 when evidence is thin

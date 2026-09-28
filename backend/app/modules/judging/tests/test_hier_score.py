@@ -124,6 +124,54 @@ def test_recommendations_prioritize_boundary():
     assert {first["project_a"], first["project_b"]} == {"p1", "p2"}
 
 
+def _jpp2_probe():
+    """6 projects spread 1.5–9.5, 2 overlapping evals each at ±0.3 noise.
+
+    Regression probe: the old one-shot estimator booked within-judge spread
+    as noise (sigma2 ~6.6 vs true ~0.09), collapsing every posterior to the
+    global mean with all-Low confidence. Deterministic by construction.
+    """
+    q = [9.5, 8.0, 6.5, 5.0, 3.5, 1.5]
+    obs = []
+    for k in range(6):
+        for t, p in enumerate([k, (k + 1) % 6]):
+            obs.append({"project_id": f"p{p}", "judge_id": f"J{k}",
+                        "score": q[p] + (0.3 if t == 0 else -0.3)})
+    return obs
+
+
+def test_jpp2_overlap_recovers_spread_and_certainty():
+    out = hier_score.fit(_jpp2_probe(), seed=0)
+    assert [r["project_id"] for r in out["ranking"]] == \
+        ["p0", "p1", "p2", "p3", "p4", "p5"]
+    # Posterior spread must carry at least half the raw spread (old: ~1/8).
+    raw = _jpp2_probe()
+    raw_spread = max(o["score"] for o in raw) - min(o["score"] for o in raw)
+    post_spread = (max(out["theta_mean"].values())
+                   - min(out["theta_mean"].values()))
+    assert post_spread >= 0.5 * raw_spread
+    # Noise estimate near truth (~0.09), nowhere near the old ~6.6.
+    assert out["hypers"]["sigma2"] < 1.0
+    assert out["variance"]["noise_dominated"] is False
+    assert sum(1 for r in out["ranking"]
+               if r["confidence"] == "High") >= 2
+
+
+def test_jpp1_still_recovers_order():
+    # Pure single-judge regime is unidentifiable by construction (one
+    # observation per cell), so this pins the stated convention: trust the
+    # scores, keep the exact order, keep effects bounded.
+    obs = [{"project_id": f"p{i}", "judge_id": f"J{i}", "score": v + d}
+           for i, (v, d) in
+           enumerate([(9.5, 0.2), (8.0, -0.2), (6.5, 0.1),
+                      (5.0, -0.1), (3.5, 0.2), (1.5, -0.2)])]
+    out = hier_score.fit(obs, seed=1)
+    assert [r["project_id"] for r in out["ranking"]] == \
+        ["p0", "p1", "p2", "p3", "p4", "p5"]
+    for e in out["judge_effects"].values():
+        assert abs(e["b_mean"]) < 0.5
+
+
 def test_refuses_empty_and_nonfinite():
     with pytest.raises(ValueError):
         hier_score.fit([])

@@ -172,6 +172,7 @@ async def calculate_bayes(event_id: str, request: Request,
         run.config = {
             "model_version": out["model_version"],
             "hypers": out["hypers"],
+            "variance": out["variance"],
             "seed": out["seed"], "n_samples": out["n_samples"],
             "top_k": out["top_k"],
             "rubric": [{"id": c.id, "name": c.name, "weight": c.weight,
