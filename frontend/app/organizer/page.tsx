@@ -578,9 +578,8 @@ function Console() {
       {/* Judging console */}
       {ev && <JudgingPanel eventId={ev.id} />}
 
-      {/* Activity review — submissions, participants and organizers only exist
-        meaningfully once the event is published; drafts show nothing here. */}
-      {ev && ev.status === "PUBLISHED" && (
+      {/* Activity review */}
+      {ev && (
         <div className="card field">
           <div className="tabs">
             <button className={reviewTab === "submissions" ? "on" : ""} onClick={() => { setReviewTab("submissions"); loadReview(ev.id); }}>Submissions ({subs.length})</button>
