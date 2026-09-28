@@ -1,5 +1,4 @@
 import os
-from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
@@ -14,17 +13,8 @@ from app.modules.gallery.routes import router as gallery_router
 from app.modules.judging.routes import router as judging_router
 from app.modules.judging.judge import router as judge_router
 from app.modules.judging.results import router as results_router
-from app.modules.judging import scheduler as auto_assign
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    await auto_assign.start()
-    yield
-    await auto_assign.stop()
-
-
-app = FastAPI(title="Dogfood T1", lifespan=lifespan)
+app = FastAPI(title="Dogfood T1")
 
 @app.get("/health")
 async def health():

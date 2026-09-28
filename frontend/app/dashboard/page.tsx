@@ -223,9 +223,7 @@ function ParticipantHome({ me }: { me: Me }) {
                   <span className={`badge ${s.status === "SUBMITTED" ? "badge-ok" : "badge-warn"}`}><span className={`pip ${s.status === "SUBMITTED" ? "pip-green" : "pip-amber"}`} />{s.status}</span>
                 </div>
               ))}
-              {teams.every((t) => subs.some((s) => s.team_id === t.id))
-                ? <p className="form-note" style={{ marginTop: 12 }}>Each of your teams already has its project — one submission per team.</p>
-                : <div style={{ marginTop: 12 }}><Link href="/submissions/new" className="btn">New project <I.arrow /></Link></div>}
+              <div style={{ marginTop: 12 }}><Link href="/submissions/new" className="btn">New project <I.arrow /></Link></div>
             </>
           )}
         </div>

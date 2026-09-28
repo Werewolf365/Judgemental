@@ -7,7 +7,6 @@ import CustomAnswers from "@/components/CustomAnswers";
 export default function EditSub({ params }: { params: { id: string } }) {
   const [f, setF] = useState<any>(null);
   const [custom, setCustom] = useState<Record<string, string>>({});
-  const [isCaptain, setIsCaptain] = useState<boolean | null>(null);
   const [deadline, setDeadline] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
@@ -15,17 +14,11 @@ export default function EditSub({ params }: { params: { id: string } }) {
 
   useEffect(() => {
     (async () => {
-      const me = await fetchMe();
-      if (!me) { window.location.href = "/login"; return; }
+      if (!await fetchMe()) { window.location.href = "/login"; return; }
       try {
         const d = await api(`/submissions/${params.id}`);
         setF(d.project);
         setCustom(d.project.custom_data || {});
-        try {
-          const t = await api(`/teams/${d.project.team_id}`);
-          const mine = (t.team?.members || []).find((m: any) => m.user_id === me.id);
-          setIsCaptain(mine ? mine.role === "CAPTAIN" : false);
-        } catch { setIsCaptain(false); }
         // Public endpoint hides unpublished events — fall back to the
         // authenticated one so the countdown still shows for drafts.
         try {
@@ -82,9 +75,7 @@ export default function EditSub({ params }: { params: { id: string } }) {
           <div className="card"><h2>Publish</h2>
             <p style={{ color: "var(--muted)", fontSize: 14 }}>Drafts are private to your team. Submitting makes the project public in the gallery.</p>
             {!closed ? (<><button className="btn-ghost" onClick={save} disabled={busy} style={{ width: "100%", marginBottom: 10 }}>Save draft</button>
-              {isCaptain === false
-                ? <p className="form-note">Only your team captain can submit — ask them to finalize when the draft is ready.</p>
-                : <button className="btn" onClick={submit} disabled={busy || isCaptain === null} style={{ width: "100%" }}>Submit project <I.arrow /></button>}
+              <button className="btn" onClick={submit} disabled={busy} style={{ width: "100%" }}>Submit project <I.arrow /></button>
               <button className="link-btn" onClick={remove} disabled={busy} style={{ width: "100%", marginTop: 8 }}>Delete draft</button></>)
               : <p>Submitted {f.submitted_at ? new Date(f.submitted_at).toLocaleString() : ""}</p>}
             {msg && <p style={{ marginTop: 10 }}>{msg}</p>}
