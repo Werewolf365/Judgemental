@@ -93,7 +93,10 @@ async def public_event(slug: str, db: AsyncSession = Depends(get_db), user: User
                       "registration_start": f(e.registration_start), "registration_close": f(e.registration_close),
                       "event_start": f(e.event_start), "event_end": f(e.event_end),
                       "submissions_open": f(e.submissions_open), "submissions_close": f(e.submissions_close),
-                      "gallery_visibility": (gv.value if hasattr(gv, "value") else str(gv or "PUBLIC"))},
+                      "gallery_visibility": (gv.value if hasattr(gv, "value") else str(gv or "PUBLIC")),
+                      "voting_enabled": bool(e.voting_enabled),
+                      "voting_close": f(e.voting_close),
+                      "voting_mode": (e.voting_mode or "auth")},
             "tracks": [{"id": t.id, "name": t.name} for t in res2.scalars().all()],
             "prizes": [{"id": p.id, "name": p.name, "description": p.description, "value_desc": p.value_desc} for p in res3.scalars().all()]}
 

@@ -38,3 +38,9 @@ The fixture `judges`/`scores`/`judge_tracks` tables stay as seeded legacy):
 - model_project_results(model_run_id, project_id, theta, rank) + model_judge_results(model_run_id, judge_user_id, r, prior_mu/sigma, posterior_mu)
 - judge_reliability_history(id, judge_user_id, event_id, model_run_id, posterior_mu, posterior_sigma NULL under MAP, r) — latest row per judge is the next competition's prior
 - pairwise_observations(id, model_run_id, judge_user_id, winner/loser project_id, weight CHECK = 1, source_evaluation_ids JSON)
+
+T3 voting (migration `0009_voting`):
+
+- events += voting_enabled bool default false, voting_close nullable UTC, voting_mode text default 'auth' (auth/email/open), comments_visibility text default 'public' (public/team)
+- ballots(id, event_id, voter_key, project_id, votes int, fp_hash?, created_at/updated_at) + unique (event_id, voter_key, project_id); voter_key is `user:<id>`, `email:<addr>` or `anon:<uuid>`
+- comments(id, event_id, project_id, author_user_id, body ≤2000, is_hidden, created_at) — hidden, never deleted

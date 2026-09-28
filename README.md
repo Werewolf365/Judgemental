@@ -28,7 +28,7 @@ Stop: `docker compose down`. Clean reset: `docker compose down -v`.
 
 Stable local session tokens for the checker live in `.dogfood.toml`.
 
-## Scope (T1 + T2) / deferred
+## Scope (T1 + T2 + T3) / deferred
 
 T1 Implemented: auth + DB sessions, account settings, events/dates/publish,
 tracks, prizes, event join/leave, teams + captain + invites + leave
@@ -44,7 +44,14 @@ enforcement, within-judge pairwise preferences, hierarchical Crowd-BT
 ranking with judge reliability + cross-event priors, versioned model runs,
 organizer results view, CSV export.
 
-Deferred: T3 voting/comments, T4 webhooks/certificates/widgets.
+T3 Implemented (see VOTING.md): opt-in public voting with organizer-set
+mode (open link / email-gated / authenticated) and end deadline, 10 votes
+per voter with square-root influence (piling votes counts for less than
+broad support), hidden-until-close results tally,
+comments with public/team-only visibility + organizer moderation, rate
+limits with audited refusals, duplicate signals, organizer-readable audit.
+
+Deferred: T4 webhooks/certificates/widgets.
 `judges`/`scores` fixture tables stay as seeded legacy data; live judging
 uses the T2 tables (DATA-MODEL.md).
 
@@ -61,7 +68,8 @@ python -m app.seed     # idempotent; safe to run twice
 - Official: `python run.py .dogfood.toml` → expect `claimed T1 T2, verified T1 T2`
 - Internal T1: `python scripts/check_t1.py` (health/seed/auth/roles/gallery/leakage)
 - Internal T2: `python scripts/check_t2.py` (rubrics/assignment/scoring/lifecycle/ranking/CSV)
-- Backend unit: `docker compose exec api python -m pytest app/modules/judging/tests/ -q`
+- Internal T3: `python scripts/check_t3.py` (settings/modes/budgets/results/comments/rate-limits/audit)
+- Backend unit: `docker compose exec api python -m pytest app/modules/judging/tests/ app/modules/voting/tests/ -q`
 - Frontend: `npm run build` (typecheck+lint) runs in the web image build.
 
 ## Known limitations

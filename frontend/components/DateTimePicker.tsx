@@ -34,11 +34,16 @@ function daysInMonth(y: number, m: number) {
 }
 
 /** Glassy Frutiger-Aero date+time picker. Value is a local "YYYY-MM-DDTHH:mm"
- *  string (interpreted as UTC by the backend), "" when unset. */
+ *  string (interpreted as UTC by the backend), "" when unset.
+ *  With defaultToday, opening an empty field pre-selects today (caller's
+ *  onChange fires once) instead of leaving the field blank — use it for
+ *  deadline fields where "today" is the sane starting point, never for
+ *  fields where an empty value means "no restriction". */
 export default function DateTimePicker({
-  value, onChange, placeholder = "Pick date & time",
+  value, onChange, placeholder = "Pick date & time", defaultToday = false,
 }: {
   value: string; onChange: (v: string) => void; placeholder?: string;
+  defaultToday?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const now = new Date();
@@ -68,6 +73,12 @@ export default function DateTimePicker({
 
   useEffect(() => {
     if (!open) return;
+    if (defaultToday && !parseLocal(value)) {
+      const n = new Date();
+      const p = { y: n.getFullYear(), m: n.getMonth(), d: n.getDate(), hh, mm };
+      setVy(p.y); setVm(p.m); setSel(p);
+      onChange(toLocal(p));
+    }
     place();
     // Second pass after paint, so the flip uses the measured height.
     const raf = requestAnimationFrame(place);

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, fmtDate } from "@/lib/api";
 import { ProjectArt, I } from "@/components/art";
+import Comments from "@/components/Comments";
 
 export default function Detail({ params }: { params: { slug: string, projectId: string } }) {
   const [p, setP] = useState<any>(null);
@@ -32,6 +33,7 @@ export default function Detail({ params }: { params: { slug: string, projectId: 
           <p style={{ color: "var(--muted)", marginTop: 14, fontSize: 13.5 }}>Submitted {fmtDate(p.submitted_at)}</p>
         </div>
       </div>
+      <Comments projectId={p.id} />
     </div>
   );
 }

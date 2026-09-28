@@ -99,6 +99,17 @@ class Event(Base):
     judging_close = Column(DateTime(timezone=True), nullable=True)
     judges_per_project = Column(Integer, nullable=False, default=2, server_default="2")
     rolling_judging = Column(Boolean, nullable=False, default=True, server_default="true")
+    # --- T3 community voting. Opt-in per event: voting_enabled flips the
+    # ballot box on, voting_close ends it (no window-open field; an enabled
+    # event with no close accepts votes indefinitely). voting_mode picks who
+    # may vote: "auth" (logged-in users), "email" (anyone with an address),
+    # "open" (anyone with a client-generated voter id). comments_visibility
+    # picks who may READ comments: "public" or "team" (the project's own
+    # team members plus organizers/admins). Posting always needs a login.
+    voting_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
+    voting_close = Column(DateTime(timezone=True), nullable=True)
+    voting_mode = Column(Text, nullable=False, default="auth", server_default="auth")
+    comments_visibility = Column(Text, nullable=False, default="public", server_default="public")
     created_by = Column(Text, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
@@ -403,3 +414,40 @@ class PairwiseObservation(Base):
     loser_project_id = Column(Text, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     weight = Column(Float, nullable=False, default=1.0, server_default="1")
     source_evaluation_ids = Column(JSON, nullable=False, default=list, server_default="[]")
+
+class Ballot(Base):
+    """One voter's voice-vote allocation on one project.
+
+    Quadratic voting: casting n votes on a project costs n^2 credits from a
+    fixed per-voter budget (see voting/quadratic.py). A voter may re-allocate
+    freely until the window closes, so (event_id, voter_key, project_id) is
+    unique and writes upsert. voter_key encodes the mode: "user:<id>",
+    "email:<normalized>", or "anon:<client-uuid>". fp_hash is a soft
+    duplicate signal (hash of IP + user-agent + event), surfaced to
+    organizers as collision counts — never an auto-block, to avoid punishing
+    shared networks.
+    """
+    __tablename__ = "ballots"
+    __table_args__ = (UniqueConstraint("event_id", "voter_key", "project_id",
+                                       name="uq_ballot_voter_project"),)
+    id = Column(Text, primary_key=True, default=_uuid)
+    event_id = Column(Text, ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id = Column(Text, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    voter_key = Column(Text, nullable=False, index=True)
+    votes = Column(Integer, nullable=False, default=0)
+    fp_hash = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+class Comment(Base):
+    """Project discussion. Posting always requires a login; READING follows
+    the event's comments_visibility ("public" vs "team"). Organizers hide
+    (never hard-delete) abuse via is_hidden."""
+    __tablename__ = "comments"
+    id = Column(Text, primary_key=True, default=_uuid)
+    event_id = Column(Text, ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id = Column(Text, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    author_user_id = Column(Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    body = Column(Text, nullable=False)
+    is_hidden = Column(Boolean, nullable=False, default=False, server_default="false")
+    created_at = Column(DateTime(timezone=True), default=utcnow)

@@ -293,6 +293,9 @@ export default function EventPage({ params }: { params: { slug: string } }) {
             )}
             {joined && <button className="btn-ghost" onClick={leave} disabled={busy}>Leave event</button>}
             <Link href={`/events/${ev.slug}/projects`} className="btn-ghost">View submissions</Link>
+            {ev.voting_enabled && (
+              <Link href={`/events/${ev.slug}/vote`} className="btn-ghost">Vote for projects</Link>
+            )}
             {ev.gallery_visibility && ev.gallery_visibility !== "PUBLIC" && (
               <span className="badge badge-muted" title="Set by the organizer">Gallery: {ev.gallery_visibility === "PARTICIPANTS" ? "Participants" : "Organizers only"}</span>
             )}

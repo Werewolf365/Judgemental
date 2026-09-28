@@ -235,7 +235,29 @@ The platform revolves around the following core entities:
 - **Frontend** (`/judge/score/[id]`): step guidance under the buttons (save draft → complete → review → submit); Submit stays disabled until a complete draft is saved with no unsaved edits; then it opens a review `Popup` (per-criterion scores, comment, weighted total) with the **Final submit** button inside. `confirm()` is gone.
 - **Backend untouched**: draft-required/complete/immutable semantics already held; check_t2's submit/409 paths re-verified green.
 
-### 32. Captain-Only Submit + Invite Crash Fix (done 2026-09-26)
+### 32.
+
+### 33. T3 Community Voting (done 2026-09-27)
+**Goal**: organizer-opt-in public voting with quadratic budgets, gated comments, and anti-abuse that actually fires — without touching T1/T2 behavior.
+- **Data** (migration `0009_voting`): event flags (`voting_enabled`, `voting_close`, `voting_mode` auth/email/open, `comments_visibility` public/team) + `ballots` (unique per voter×project, quadratic spend) + `comments` (hide-don't-delete moderation).
+- **Rules**: 100 credits per voter, n votes cost n² (pure `quadratic.py`, 10 unit tests); drafts staff-only across the voting surface like the gallery; results 403 until the deadline passes, then public tally with 1224 ranks; comments need login, team-mode threads visible to the project's team + staff only.
+- **Anti-abuse**: in-memory token buckets (30 ballot / 20 comment per min, env-tunable, 429 + audited refusals), fingerprint-collision turnout signals (advisory, never auto-blocking), own-team block for logins.
+- **UI, zero polling**: `/events/[slug]/vote` (credits meter, steppers, per-mode identity, results after close), comments thread on project pages, console Step 7 (settings cards, deadline, turnout, audit search). Lag-free by construction — single load each.
+- **Caught live, twice**: (1) tally "missing" P2 was a dropped suite step, not an app bug — the formalized check never cast the deciding vote; fixed the suite, exact tally asserted. (2) Three straight runs collided on reused probe emails; `mkuser` now logs in on 409 (rerun-safe).
+- **Verified**: check_t3 ALL PASS (34 checks), unit 25/25, run.py 7/7, check_t1/check_t2 green, no T1/T2 route touched.
+
+### 34. Voting Remodel — 10 Votes, Square-Root Influence (done 2026-09-27)
+**Goal**: the credits-and-squares UX confused voters; organizers asked for "10 votes to distribute, total never above 10, no squared math shown" — while keeping the quadratic anti-concentration requirement (n votes carry √n influence).
+- **Model** (`voting/quadratic.py`): per-voter cap of 10 total votes; tally sums **per-ballot** √votes per project (1224 ranks, deterministic). Spent/remaining now mean votes used/left; no totals or costs surface anywhere in the UI.
+- **UI**: vote page shows "Votes left: X of 10", steppers refuse to exceed 10 in total, results show score (influence, 2dp); organizer view replaces casting controls for staff. DateTimePicker gains `defaultToday` (empty deadline fields pre-select today) — applied to voting + event deadlines, deliberately NOT to judging open/close (that would silently create restrictions).
+- **Caught live, twice**: (1) the remodel's first `tally()` summed raw votes then took one √ (sqrt-of-sum) — wrong invariant, and the unit test accidentally encoded it (√4 = 2.0 passes either way); fixed the function AND pinned the test to √3+√1 ≈ 2.7321 with a comment stating the distinction. (2) A stale `quadratic.CREDITS` reference 500'd the ballot box — fixed to `VOTE_CAP`.
+- **Verified**: check_t3 ALL PASS (exact sqrt tally asserted), unit 25/25, run.py 7/7.
+
+### 35. Vote UX: Cast Confirmation + Organizer Standings (done 2026-09-27)
+**Goal**: voters got no persistent "you voted" signal, and organizers had no way to see live standings before close.
+- **Voter**: the vote page now tracks server-confirmed allocations separately from local edits — a "Votes cast — X of 10 placed" badge plus per-project "✓ N votes cast", with an "unsaved changes" note when the two differ. Survives reload (state comes from the server, not memory).
+- **Organizer**: new `GET /events/{id}/voting/standings` (staff-only; 403 participant, 401 anon, all probed) sharing one `_rank_event` helper with the public results endpoint so both can never disagree. The organizer ballot view renders the live ranking with a "public results publish at close" note. The public results gate itself is untouched.
+- **Verified**: standings matrix live, check_t3 ALL PASS, run.py 7/7, unit 25/25. Captain-Only Submit + Invite Crash Fix (done 2026-09-26)
 **Goal**: only the team captain may finalize a submission; also fixed an invite endpoint that 500'd for everyone.
 - **Backend** (`submissions/routes.py`): `POST /submissions/{id}/submit` answers 403 unless the caller holds CAPTAIN on the team. Draft create/edit/delete stay member-level (collaborative drafting, single submitter — the Devfolio pattern). All suite submitters are team creators (captains), so no suite changes needed.
 - **Backend** (`teams/routes.py`): `POST /teams/{id}/invites` crashed with `NameError: request` (T2 commit added an audit call without the `Request` param) — added the missing parameter. Invite flow works again.

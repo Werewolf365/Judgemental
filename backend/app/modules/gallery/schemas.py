@@ -31,6 +31,9 @@ class EventDetailsOut(BaseModel):
     submissions_open: Optional[str]
     submissions_close: Optional[str]
     gallery_visibility: Optional[str] = "PUBLIC"
+    voting_enabled: Optional[bool] = False
+    voting_close: Optional[str] = None
+    voting_mode: Optional[str] = "auth"
 
 class EventResponse(BaseModel):
     event: EventDetailsOut

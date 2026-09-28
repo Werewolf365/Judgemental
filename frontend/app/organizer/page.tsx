@@ -14,6 +14,7 @@ const STEPS = [
   { n: 4, key: "form", label: "Submission form" },
   { n: 5, key: "gallery", label: "Gallery access" },
   { n: 6, key: "publish", label: "Review & publish" },
+  { n: 7, key: "voting", label: "Voting" },
 ] as const;
 type StepKey = typeof STEPS[number]["key"];
 
@@ -57,6 +58,12 @@ function Console() {
   const [newField, setNewField] = useState({ label: "", field_type: "text", required: false, optionsText: "" });
   const [editingId, setEditingId] = useState("");
   const [editField, setEditField] = useState({ label: "", field_type: "text", required: false, optionsText: "" });
+  // voting step
+  const [voting, setVoting] = useState<any>(null);
+  const [vClose, setVClose] = useState("");
+  const [turnout, setTurnout] = useState<any>(null);
+  const [audit, setAudit] = useState<any[]>([]);
+  const [auditQ, setAuditQ] = useState("");
   // One-shot confirmation after a publish, so the moment of going live is
   // unmistakable rather than a line of text that scrolls past.
   const [notice, setNotice] = useState<{ title: string; body: React.ReactNode } | null>(null);
@@ -77,12 +84,42 @@ function Console() {
           api(`/events/${d.event.id}/prizes`).catch(() => ({ prizes: [] })),
         ]);
         setDetail({ event: d.event, tracks: t.tracks || [], prizes: p.prizes || [] });
-      } catch { setDetail(null); setFormFields([]); return; }
+      } catch { setDetail(null); setFormFields([]); setVoting(null); return; }
     }
     try {
       const ff = await api(`/events/${id}/form-fields`);
       setFormFields(ff.fields || []);
     } catch { setFormFields([]); }
+    await loadVoting(id);
+  }
+
+  async function loadVoting(id: string) {
+    try {
+      const v = await api(`/events/${id}/voting`);
+      setVoting(v.config);
+      setVClose(v.config.voting_close ? v.config.voting_close.slice(0, 16) : "");
+      setTurnout(v.turnout);
+    } catch { setVoting(null); }
+  }
+
+  async function saveVoting(patch: any) {
+    if (!detail) return;
+    setMsg("");
+    try {
+      const d = await api(`/events/${detail.event.id}/voting`,
+        { method: "PATCH", body: JSON.stringify(patch) });
+      setVoting(d.config);
+      setMsg("Voting settings saved.");
+      await loadVoting(detail.event.id);
+    } catch (e: any) { setMsg(e.message); }
+  }
+
+  async function loadAudit() {
+    if (!detail) return;
+    try {
+      const d = await api(`/events/${detail.event.id}/audit?q=${encodeURIComponent(auditQ)}&limit=100`);
+      setAudit(d.entries || []);
+    } catch (e: any) { setMsg(e.message); }
   }
 
   async function loadEvents(selectId?: string) {
@@ -146,7 +183,7 @@ function Console() {
     try {
       const d = await api("/events", { method: "POST", body: JSON.stringify({ name: name.trim(), submissions_close: close || new Date(Date.now() + 30 * 864e5).toISOString() }) });
       setName(""); setClose("");
-      setMsg(`Draft “${d.event.name}” created — Step 1 of 6 done. Add tracks next.`);
+      setMsg(`Draft “${d.event.name}” created — Step 1 of 7 done. Add tracks next.`);
       await loadEvents(d.event.id);
       setStep("tracks");
     } catch (e: any) { setMsg(e.message); }
@@ -267,7 +304,7 @@ function Console() {
         </Popup>
       )}
       <div className="page-head"><span className="eyebrow"><span className="dot" /> Organizer</span><h1>Event console</h1>
-        <p className="lead">Six steps, in order: details, tracks, prizes, submission form, gallery access, then publish.</p></div>
+        <p className="lead">Seven steps, in order: details, tracks, prizes, submission form, gallery access, publish, then voting.</p></div>
 
       {/* Working event bar */}
       <div className="card field" style={{ padding: "14px 22px" }}>
@@ -289,7 +326,7 @@ function Console() {
               className={`step ${s.n < stepN || (s.key === "publish" && ev?.status === "PUBLISHED") ? "done" : s.n === stepN ? "now" : ""}`}
               style={{ background: "none", borderLeft: 0, borderRight: 0, borderBottom: 0, cursor: "pointer", textAlign: "left", font: "inherit" }}>
               <b><span className="n">{s.n < stepN ? "✓" : s.n}</span> {s.label}</b>
-              {s.key === "details" && ev ? ev.name : s.key === "tracks" && ev ? `${detail?.tracks?.length || 0} added` : s.key === "prizes" && ev ? `${detail?.prizes?.length || 0} added` : s.key === "form" && ev ? `${formFields.length} fields` : s.key === "gallery" && ev ? VIS_OPTIONS.find((o) => o.v === curVis)?.title : s.key === "publish" && ev ? ev.status : ""}
+              {s.key === "details" && ev ? ev.name : s.key === "tracks" && ev ? `${detail?.tracks?.length || 0} added` : s.key === "prizes" && ev ? `${detail?.prizes?.length || 0} added` : s.key === "form" && ev ? `${formFields.length} fields` : s.key === "gallery" && ev ? VIS_OPTIONS.find((o) => o.v === curVis)?.title : s.key === "publish" && ev ? ev.status : s.key === "voting" && voting ? (voting.voting_enabled ? `On · ${voting.voting_mode}` : "Off") : ""}
             </button>
           ))}
         </div>
@@ -299,7 +336,7 @@ function Console() {
           <div>{!ev ? (
             <div style={{ maxWidth: 560 }}><h2>Step 1 — Name your event</h2>
               <label>Event name</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Spring Hack 2027" />
-              <label>Submissions close (UTC)</label><DateTimePicker value={close} onChange={setClose} placeholder="Pick deadline date & time" />
+              <label>Submissions close (UTC)</label><DateTimePicker value={close} onChange={setClose} placeholder="Pick deadline date & time" defaultToday />
               <div style={{ display: "flex", gap: 10 }}>
                 <button className="btn" onClick={create}>Create draft <I.arrow /></button>
               </div></div>
@@ -307,7 +344,7 @@ function Console() {
             <div style={{ maxWidth: 560 }}><h2>Step 1 — Event details</h2>
               <label>Event name</label><input value={eName} onChange={(e) => setEName(e.target.value)} />
               <label>Description</label><textarea value={eDesc} onChange={(e) => setEDesc(e.target.value)} placeholder="What is this hackathon about?" />
-              <label>Submissions close (UTC)</label><DateTimePicker value={eClose} onChange={setEClose} placeholder="Pick deadline date & time" />
+              <label>Submissions close (UTC)</label><DateTimePicker value={eClose} onChange={setEClose} placeholder="Pick deadline date & time" defaultToday />
               <div style={{ display: "flex", gap: 10 }}>
                 <button className="btn-ghost" onClick={saveDetails}>Save details</button>
                 <button className="btn" onClick={() => goStep("tracks")}>Continue to tracks <I.arrow /></button>
@@ -443,7 +480,69 @@ function Console() {
               <a className="btn-ghost btn-sm" href={`/events/${ev.slug || ev.id}/projects`}>View gallery</a>
             </div>
             <div style={{ marginTop: 14 }}>
-              <button className="btn-ghost btn-sm" onClick={() => goStep("gallery")}><I.back /> Back to gallery access</button>
+              <button className="btn-ghost btn-sm" onClick={() => goStep("gallery")}><I.back /> Back to gallery access</button>{" "}
+              <button className="btn btn-sm" onClick={() => goStep("voting")}>Continue to voting <I.arrow /></button>
+            </div></>)}</div>
+        )}
+        {step === "voting" && (
+          <div>{!ev ? <p style={{ color: "var(--muted)" }}>Create an event first (Step 1).</p> : (
+          <><h2>Step 7 — Community voting</h2>
+            <p style={{ color: "var(--muted)" }}>Every voter gets 10 votes to spread across projects. Piling votes onto one project counts for less than broad support, and results stay hidden until the deadline passes.</p>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14.5 }}>
+              <input type="checkbox" checked={!!voting?.voting_enabled} style={{ width: "auto", margin: 0 }}
+                onChange={(e) => saveVoting({ voting_enabled: e.target.checked })} /> Accept public votes for this event
+            </label>
+            {voting?.voting_enabled && (
+              <>
+                <h3>Who may vote?</h3>
+                <div className="grid grid-3">
+                  {[{ v: "open", title: "Open link", desc: "Anyone with the link. Weakest identity — duplicates are flagged, not blocked." },
+                    { v: "email", title: "Email-gated", desc: "One ballot set per email address." },
+                    { v: "auth", title: "Authenticated", desc: "Logged-in users only. Can block own-team votes." }].map((o) => (
+                    <button key={o.v} type="button" onClick={() => saveVoting({ voting_mode: o.v })}
+                      className="card" style={{ margin: 0, cursor: "pointer", textAlign: "left",
+                        outline: voting?.voting_mode === o.v ? "2px solid var(--aqua)" : undefined }}>
+                      <b>{o.title}</b>
+                      <div style={{ fontSize: 13.5, color: "var(--muted)" }}>{o.desc}</div>
+                      {voting?.voting_mode === o.v && <div style={{ marginTop: 8 }}><span className="badge badge-ok"><span className="pip pip-green" /> Selected</span></div>}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ maxWidth: 560, marginTop: 12 }}>
+                  <label>Voting ends (UTC) — blank means open-ended</label>
+                  <DateTimePicker value={vClose} onChange={setVClose} placeholder="No closing deadline" defaultToday />
+                  <div style={{ marginTop: 8 }}><button className="btn-ghost btn-sm" onClick={() => saveVoting({ voting_close: vClose || null })}>Save deadline</button></div>
+                </div>
+                <h3>Comments</h3>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {[["public", "Public — everyone sees comments"], ["team", "Team-only — only each project's team (and organizers)"]].map(([v, label]) => (
+                    <button key={v} type="button" className={voting?.comments_visibility === v ? "btn btn-sm" : "btn-ghost btn-sm"}
+                      onClick={() => saveVoting({ comments_visibility: v })}>{label}</button>
+                  ))}
+                </div>
+                <h3>Turnout</h3>
+                {turnout
+                  ? <p style={{ color: "var(--muted)" }}>{turnout.voters} voter{turnout.voters === 1 ? "" : "s"} · {turnout.ballots} ballot{turnout.ballots === 1 ? "" : "s"}{turnout.fp_collisions?.length ? ` · ${turnout.fp_collisions.length} shared-device signal${turnout.fp_collisions.length === 1 ? "" : "s"} under review` : " · no duplicate signals"}</p>
+                  : <p style={{ color: "var(--muted)" }}>No votes yet.</p>}
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <a className="btn-ghost btn-sm" href={`/events/${ev.slug || ev.id}/vote`}>Open ballot box</a>
+                  <button className="btn-ghost btn-sm" onClick={() => loadVoting(ev.id)}>Refresh</button>
+                </div>
+                <h3>Event audit trail</h3>
+                <p style={{ color: "var(--muted)", fontSize: 13.5 }}>Every security-relevant action on this event — votes, refusals, moderation — readable here, no database client needed.</p>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input value={auditQ} onChange={(e) => setAuditQ(e.target.value)} placeholder="Filter actions, emails…" style={{ flex: 1 }} />
+                  <button className="btn-ghost btn-sm" onClick={loadAudit}>Search audit</button>
+                </div>
+                {!audit.length && <p style={{ color: "var(--muted)" }}>No matching entries — search to load.</p>}
+                {audit.map((a: any) => (
+                  <div key={a.id} style={{ padding: "6px 0", borderTop: "1px solid var(--line)", fontSize: 13.5 }}>
+                    <b className="mono">{a.action}</b> <span style={{ color: "var(--muted)" }}>{a.actor_email || "anonymous"} · {a.created_at ? new Date(a.created_at).toLocaleString() : ""}{a.ip ? ` · ${a.ip}` : ""}</span>
+                  </div>))}
+              </>
+            )}
+            <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+              <button className="btn-ghost" onClick={() => goStep("publish")}><I.back /> Back</button>
             </div></>)}</div>
         )}
       </div>
