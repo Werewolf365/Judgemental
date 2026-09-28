@@ -21,7 +21,7 @@ const YEAR_OPTIONS = ["", "1st Year", "2nd Year", "3rd Year", "4th Year", "5th Y
 type RegForm = {
   fullName: string; email: string; phone: string; age: string;
   degree: string; yearOfStudy: string; institution: string;
-  dietaryRestrictions: string; tshirtSize: string;
+  dietaryRestrictions: string;
 };
 type RegErrors = Partial<Record<keyof RegForm, string>>;
 
@@ -59,7 +59,6 @@ function RegistrationOverlay({
     yearOfStudy: me?.profile?.year_of_study || "",
     institution: me?.profile?.institution || "",
     dietaryRestrictions: me?.profile?.dietary_restrictions || "",
-    tshirtSize: me?.profile?.tshirt_size || "",
   }));
   const [errors, setErrors] = useState<RegErrors>({});
   const [submitting, setSubmitting] = useState(false);
@@ -160,18 +159,7 @@ function RegistrationOverlay({
             placeholder="Indian Institute of Technology Bombay" className={errors.institution ? "has-error" : ""} />
           <FieldErr msg={errors.institution} />
 
-          {/* Row 5 — T-shirt */}
-          <label htmlFor="reg-tshirt">T-shirt size</label>
-          <select id="reg-tshirt" value={form.tshirtSize} onChange={(e) => set("tshirtSize", e.target.value)}>
-            <option value="">N/A</option>
-            {["XS", "S", "M", "L", "XL", "XXL"].map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <p className="form-note" style={{ marginTop: 8 }}>
-            Which track will you compete in? Nothing to pick here — your team chooses
-            one track when it creates its project, so every teammate is on the same track by construction.
-          </p>
-
-          {/* Row 6 — Dietary */}
+          {/* Row 5 — Dietary */}
           <label htmlFor="reg-dietary">Dietary restrictions</label>
           <input id="reg-dietary" value={form.dietaryRestrictions} onChange={(e) => set("dietaryRestrictions", e.target.value)}
             placeholder="None, Vegetarian, Vegan, Gluten-free…" />

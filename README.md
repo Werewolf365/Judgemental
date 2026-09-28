@@ -23,8 +23,47 @@ Stop: `docker compose down`. Clean reset: `docker compose down -v`.
 
 - organizer@local.test (ORGANIZER)
 - admin@local.test (ADMIN)
+- judge@local.test (JUDGE)
 - participant@local.test (PARTICIPANT)
 - 30 fixture judges (role JUDGE), 91 fixture participants
+
+## Dedicated demo events (manual testing)
+
+`python scripts/seed_demos.py` (rerun-safe) ensures three stable events with
+full tracks + prizes, so specific flows can be tested by hand without
+tripping over per-run probe data:
+
+- `demo-bt` — BT Model Demo: Craft 60 / Scope 40 rubric, 2 judges, batch mode.
+- `demo-vote` — Community Vote Demo: open ballot, public comments.
+- `demo-bayes` — Bayes Score Demo: unweighted rubric, 1 judge per project.
+
+Sample Hack 2026 and `fixtures.json` data are never touched by it.
+
+`python scripts/seed_demo_data.py` (rerun-safe, run after the above) fills
+those events with real data — demo-* users, teams, SUBMITTED projects,
+judge scores, ballots — and runs the calculations, so each demo is
+immediately viewable in the UI:
+
+- `demo-bt` — 8 projects across both tracks, 4 judges (2 evaluations
+  each), designed scoring gradient, Crowd-BT ranking P1>…>P8 with
+  reliabilities.
+- `demo-bayes` — 4 projects, 2 judges, H1>H2>H3>H4 under the hier-Bayes
+  scorer with means, ranges and Top-K.
+- `demo-vote` — 5 projects, 4 voters with varied ballots, visible comment
+  thread, window closed, public tally P1>P2>P3>P5>P4.
+
+## Cleaning test-probe clutter
+
+`check_t1/t2/t3.py` leave per-run probe events + users behind
+(`t2-probe-*`, `t3-probe-*`, `scope-probe-tmp`, …). To wipe them:
+
+```
+python scripts/clean_probes.py --dry-run   # list only
+python scripts/clean_probes.py             # delete
+```
+
+Keeps `evt_01`, the `demo-*` events, fixture users and all four demo
+accounts. Needs the `db` container running.
 
 Stable local session tokens for the checker live in `.dogfood.toml`.
 

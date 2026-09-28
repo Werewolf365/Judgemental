@@ -11,7 +11,7 @@ export default function Settings() {
   const [pwMsg, setPwMsg] = useState("");
   const [avatar, setAvatar] = useState<string | null>(null);
   const [avatarMsg, setAvatarMsg] = useState("");
-  const [prof, setProf] = useState({ phone: "", age: "", degree: "", yearOfStudy: "", institution: "", tshirtSize: "", dietaryRestrictions: "" });
+  const [prof, setProf] = useState({ phone: "", age: "", degree: "", yearOfStudy: "", institution: "", dietaryRestrictions: "" });
   const [profMsg, setProfMsg] = useState("");
   const router = useRouter();
 
@@ -25,7 +25,7 @@ export default function Settings() {
       setProf({
         phone: p.phone || "", age: p.age != null ? String(p.age) : "",
         degree: p.degree || "", yearOfStudy: p.year_of_study || "",
-        institution: p.institution || "", tshirtSize: p.tshirt_size || "",
+        institution: p.institution || "",
         dietaryRestrictions: p.dietary_restrictions || "",
       });
     })();
@@ -95,14 +95,14 @@ export default function Settings() {
       const d = await api("/auth/me", { method: "PATCH", body: JSON.stringify({ profile: {
         phone: prof.phone.trim(), age: prof.age.trim() === "" ? null : Number(prof.age),
         degree: prof.degree, year_of_study: prof.yearOfStudy,
-        institution: prof.institution.trim(), tshirt_size: prof.tshirtSize,
+        institution: prof.institution.trim(),
         dietary_restrictions: prof.dietaryRestrictions.trim(),
       } }) });
       const p = (d.user as any).profile || {};
       setProf({
         phone: p.phone || "", age: p.age != null ? String(p.age) : "",
         degree: p.degree || "", yearOfStudy: p.year_of_study || "",
-        institution: p.institution || "", tshirtSize: p.tshirt_size || "",
+        institution: p.institution || "",
         dietaryRestrictions: p.dietary_restrictions || "",
       });
       setProfMsg("Registration details saved — next event's form will prefill from these.");
@@ -171,19 +171,8 @@ export default function Settings() {
           </div>
           <label>Institution / college</label>
           <input value={prof.institution} onChange={(e) => setP("institution", e.target.value)} placeholder="Indian Institute of Technology Bombay" maxLength={300} />
-          <div className="reg-row">
-            <div className="reg-col">
-              <label>T-shirt size</label>
-              <select value={prof.tshirtSize} onChange={(e) => setP("tshirtSize", e.target.value)}>
-                <option value="">N/A</option>
-                {["XS", "S", "M", "L", "XL", "XXL"].map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-            <div className="reg-col">
-              <label>Dietary restrictions</label>
-              <input value={prof.dietaryRestrictions} onChange={(e) => setP("dietaryRestrictions", e.target.value)} placeholder="None, Vegetarian…" maxLength={500} />
-            </div>
-          </div>
+          <label>Dietary restrictions</label>
+          <input value={prof.dietaryRestrictions} onChange={(e) => setP("dietaryRestrictions", e.target.value)} placeholder="None, Vegetarian…" maxLength={500} />
           {profMsg && <p>{profMsg}</p>}
           <button className="btn" type="submit">Save details</button>
         </form>

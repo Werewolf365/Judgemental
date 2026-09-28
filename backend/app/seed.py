@@ -28,6 +28,7 @@ TEST_TOKENS = {
     "organizer@local.test": "org_7f2a_local_test_token",
     "admin@local.test": "adm_9c1b_local_test_token",
     "participant@local.test": "prt_2e88_local_test_token",
+    "judge@local.test": "jdg_4d29_local_test_token",
 }
 
 def parse_dt(v):
@@ -79,6 +80,7 @@ async def main():
             org, _ = await get_or_create_user(db, "organizer@local.test", "Organizer", Role.ORGANIZER, enforce_role=True)
             adm, _ = await get_or_create_user(db, "admin@local.test", "Admin", Role.ADMIN, enforce_role=True)
             prt, _ = await get_or_create_user(db, "participant@local.test", "Participant", Role.PARTICIPANT, enforce_role=True)
+            await get_or_create_user(db, "judge@local.test", "Judge", Role.JUDGE, enforce_role=True)
         # Event
         ev = fx.get("event", {})
         slug = ev.get("name", "Sample Hack 2026").lower().replace(" ", "-") + "-2026"
