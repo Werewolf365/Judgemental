@@ -73,13 +73,18 @@ def ensure_event(slug, name, description):
 
 def ensure_tracks(ev, names):
     _, b = J(f"/events/{ev}/tracks", O)
-    have = {t["name"]: t["id"] for t in b.get("tracks", [])}
+    have = {t["name"]: t for t in b.get("tracks", [])}
+    out = {}
     for n in names:
         if n not in have:
             s, d = J(f"/events/{ev}/tracks", O, "POST", {"name": n})
             if s == 200:
-                have[n] = d["track"]["id"]
-    return have
+                out[n] = d["track"]["id"]
+        else:
+            out[n] = have[n]["id"]
+            if not have[n].get("is_active", True):
+                J(f"/tracks/{have[n]['id']}", O, "PATCH", {"is_active": True})
+    return out
 
 
 def ensure_prizes(ev, specs, tracks):

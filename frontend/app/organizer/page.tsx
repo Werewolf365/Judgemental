@@ -238,9 +238,44 @@ function Console() {
     try { await api(`/events/${detail.event.id}/tracks`, { method: "POST", body: JSON.stringify({ name: trackName.trim() }) }); setTrackName(""); await loadDetail(detail.event.id); }
     catch (e: any) { setMsg(e.message); }
   }
+  const [editingTrackId, setEditingTrackId] = useState("");
+  const [editTrackName, setEditTrackName] = useState("");
+  async function saveTrack(id: string) {
+    if (!editTrackName.trim()) { setMsg("Track name can't be empty."); return; }
+    try { await api(`/tracks/${id}`, { method: "PATCH", body: JSON.stringify({ name: editTrackName.trim() }) }); setEditingTrackId(""); await loadDetail(detail.event.id); setMsg("Track renamed."); }
+    catch (e: any) { setMsg(e.message); }
+  }
+  async function removeTrack(id: string, name: string) {
+    if (!confirm(`Remove track “${name}”? Tracks with projects are kept but deactivated instead of deleted.`)) return;
+    try {
+      const d = await api(`/tracks/${id}`, { method: "DELETE" });
+      setMsg(d.deactivated ? `“${name}” has projects, so it was deactivated instead of deleted.` : `Track “${name}” removed.`);
+      await loadDetail(detail.event.id);
+    } catch (e: any) { setMsg(e.message); }
+  }
+  async function reactivateTrack(id: string, name: string) {
+    try { await api(`/tracks/${id}`, { method: "PATCH", body: JSON.stringify({ is_active: true }) }); await loadDetail(detail.event.id); setMsg(`Track “${name}” is back on. New submissions can use it again.`); }
+    catch (e: any) { setMsg(e.message); }
+  }
   async function addPrize() {
     if (!prize.name.trim() || !detail) return;
     try { await api(`/events/${detail.event.id}/prizes`, { method: "POST", body: JSON.stringify(prize) }); setPrize({ name: "", description: "", value_desc: "" }); await loadDetail(detail.event.id); }
+    catch (e: any) { setMsg(e.message); }
+  }
+  const [editingPrizeId, setEditingPrizeId] = useState("");
+  const [editPrize, setEditPrize] = useState({ name: "", description: "", value_desc: "" });
+  function startPrizeEdit(p: any) {
+    setEditingPrizeId(p.id);
+    setEditPrize({ name: p.name || "", description: p.description || "", value_desc: p.value_desc || "" });
+  }
+  async function savePrize(id: string) {
+    if (!editPrize.name.trim()) { setMsg("Prize name can't be empty."); return; }
+    try { await api(`/prizes/${id}`, { method: "PATCH", body: JSON.stringify(editPrize) }); setEditingPrizeId(""); await loadDetail(detail.event.id); setMsg("Prize updated."); }
+    catch (e: any) { setMsg(e.message); }
+  }
+  async function removePrize(id: string, name: string) {
+    if (!confirm(`Remove prize “${name}”?`)) return;
+    try { await api(`/prizes/${id}`, { method: "DELETE" }); await loadDetail(detail.event.id); setMsg(`Prize “${name}” removed.`); }
     catch (e: any) { setMsg(e.message); }
   }
   function parseOptions(text: string) {
@@ -412,7 +447,24 @@ function Console() {
           <><h2>Step 2 — Tracks ({detail?.tracks?.length || 0})</h2>
             <p style={{ color: "var(--muted)" }}>Categories participants submit into. You can add more later.</p>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-              {(detail?.tracks || []).map((t: any) => <span key={t.id} className="badge badge-track">{t.name}</span>)}
+              {(detail?.tracks || []).map((t: any) => (
+                editingTrackId === t.id ? (
+                  <span key={t.id} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <input aria-label="Track name" value={editTrackName} onChange={(e) => setEditTrackName(e.target.value)} style={{ maxWidth: 200 }} />
+                    <button className="btn btn-sm" onClick={() => saveTrack(t.id)}>Save</button>
+                    <button className="btn-ghost btn-sm" onClick={() => setEditingTrackId("")}>Cancel</button>
+                  </span>
+                ) : (
+                  <span key={t.id} className="badge badge-track" style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+                    {t.name}
+                    {!t.is_active && <em style={{ fontStyle: "normal", opacity: .7 }}>(off)</em>}
+                    <button type="button" className="link-btn" style={{ fontSize: 12 }} onClick={() => { setEditingTrackId(t.id); setEditTrackName(t.name); }}>Edit</button>
+                    {!t.is_active
+                      ? <button type="button" className="link-btn" style={{ fontSize: 12 }} onClick={() => reactivateTrack(t.id, t.name)}>Reactivate</button>
+                      : <button type="button" className="link-btn" style={{ fontSize: 12 }} onClick={() => removeTrack(t.id, t.name)}>Remove</button>}
+                  </span>
+                )
+              ))}
             </div>
             <form onSubmit={(e) => { e.preventDefault(); addTrack(); }} style={{ display: "flex", gap: 8 }}><input value={trackName} onChange={(e) => setTrackName(e.target.value)} placeholder="New track name" style={{ flex: 1 }} />
               <button className="btn" type="submit">Add track</button></form>
@@ -426,7 +478,27 @@ function Console() {
           <div>{!ev ? <p style={{ color: "var(--muted)" }}>Create an event first (Step 1).</p> : (
           <><h2>Step 3 — Prizes ({detail?.prizes?.length || 0})</h2>
             <p style={{ color: "var(--muted)" }}>Optional, but every professional event page shows them.</p>
-            {(detail?.prizes || []).map((p: any) => <div key={p.id} style={{ padding: "8px 0", borderTop: "1px solid var(--line)" }}><b>{p.name}</b> <span style={{ color: "var(--muted)" }}>{p.description}</span></div>)}
+            {(detail?.prizes || []).map((p: any) => (
+              editingPrizeId === p.id ? (
+                <div key={p.id} className="grid grid-3" style={{ padding: "8px 0", borderTop: "1px solid var(--line)", gap: 8 }}>
+                  <input aria-label="Prize name" value={editPrize.name} onChange={(e) => setEditPrize({ ...editPrize, name: e.target.value })} />
+                  <input aria-label="Prize description" value={editPrize.description} onChange={(e) => setEditPrize({ ...editPrize, description: e.target.value })} />
+                  <input aria-label="Prize value" value={editPrize.value_desc} onChange={(e) => setEditPrize({ ...editPrize, value_desc: e.target.value })} />
+                  <span style={{ display: "flex", gap: 8 }}>
+                    <button className="btn btn-sm" onClick={() => savePrize(p.id)}>Save</button>
+                    <button className="btn-ghost btn-sm" onClick={() => setEditingPrizeId("")}>Cancel</button>
+                  </span>
+                </div>
+              ) : (
+                <div key={p.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>
+                  <div><b>{p.name}</b> <span style={{ color: "var(--muted)" }}>{p.description}{p.value_desc ? ` · ${p.value_desc}` : ""}</span></div>
+                  <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                    <button className="btn-ghost btn-sm" onClick={() => startPrizeEdit(p)}>Edit</button>
+                    <button className="link-btn" onClick={() => removePrize(p.id, p.name)}>Remove</button>
+                  </span>
+                </div>
+              )
+            ))}
             <div className="grid grid-3" style={{ marginTop: 10 }}>
               <input placeholder="Prize name" value={prize.name} onChange={(e) => setPrize({ ...prize, name: e.target.value })} />
               <input placeholder="Description" value={prize.description} onChange={(e) => setPrize({ ...prize, description: e.target.value })} />
