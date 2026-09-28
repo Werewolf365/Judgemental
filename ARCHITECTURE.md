@@ -5,8 +5,8 @@ Browser → :8080 nginx gateway → web:3000 (Next.js) | api:8000 (FastAPI) → 
 ```
 
 Modular monolith: ONE deployable backend. Modules `auth, events, teams,
-submissions, gallery, admin` communicate via service/repository imports,
-never HTTP. `judging/` and `voting/` are boundary placeholders (README only).
+submissions, gallery, judging, admin` communicate via service/repository imports,
+never HTTP. `voting/` remains a boundary placeholder (README only).
 
 Request flow: route (thin) → service logic inline in route → SQLAlchemy →
 PostgreSQL. AuthZ lives server-side: `current_user` (HttpOnly `session`
@@ -41,6 +41,19 @@ attempts are audited as `user.role_change_refused`.
 events rather than competing in them, and a judge must not end up eligible to
 submit into the event they are judging. The check is on the account's role, not
 on a per-event relationship, so no event lets a staff account slip through.
+
+Judging lives in `modules/judging/` with the same shape: `routes.py`
+(organizer/admin rubric, roster, config, results, CSV export),
+`judge.py` (judge-only scoring, peer-isolated by re-checking every id
+against the caller), `results.py` (calculate pipeline + run history),
+and DB-free services — `service.py` (derived stage, weight resolution,
+rubric lock), `assign.py` (balanced assignment), `pairwise.py`
+(preference generation), `reliability.py` (cross-event priors),
+`crowd_bt.py` (MAP fit). No workers or queues exist (and none may be
+added per the local-first constraint): rolling assignment runs in-request
+after a successful submit and can never fail it; batch assignment and the
+final calculation are explicit organizer actions. Judge identity is
+`users.id` everywhere; the fixture `judges` table is legacy seed data.
 
 `shared/audit.record()` writes the audit trail on its own short-lived session so
 a row survives a rolled-back or denied action, and it never raises: a broken

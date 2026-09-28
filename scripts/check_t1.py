@@ -197,6 +197,12 @@ check("setting the current role is a no-op", s == 200 and '"changed": false' in 
 s, b = req("/admin/users/role", header=A, method="POST", body={"email": "admin@local.test", "role": "JUDGE"})
 check("admin cannot change own role, so the last admin is safe (409)", s == 409, f"got {s}")
 # Audit trail must contain the security-relevant actions, and no secrets.
+# Produce a fresh failed sign-in first: the audit window is newest-first with
+# a bounded limit, so a historical row cannot be relied on to still be inside
+# it after hundreds of later runs (T2 probing hit exactly this).
+s, b = req("/auth/login", method="POST",
+           body={"email": "participant@local.test", "password": "DefinitelyWrong123!"})
+check("bad password is rejected (401)", s == 401, f"got {s}")
 s, b = req("/admin/audit?limit=500", header=A)
 d = json.loads(b) if s == 200 else {}
 actions = {e["action"] for e in d.get("entries", [])}

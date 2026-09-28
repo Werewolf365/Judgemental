@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { api, fetchMe, fmtDate } from "@/lib/api";
 import { I } from "@/components/art";
 import DateTimePicker from "@/components/DateTimePicker";
+import JudgingPanel from "@/components/JudgingPanel";
 import Popup from "@/components/Popup";
 
 const STEPS = [
@@ -446,6 +447,9 @@ function Console() {
             </div></>)}</div>
         )}
       </div>
+
+      {/* Judging console */}
+      {ev && <JudgingPanel eventId={ev.id} />}
 
       {/* Activity review */}
       {ev && (

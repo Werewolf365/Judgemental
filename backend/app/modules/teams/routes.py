@@ -79,7 +79,7 @@ async def get_team(team_id: str, db: AsyncSession = Depends(get_db), user: User 
     return {"team": team_out(t, await _members(db, team_id))}
 
 @router.post("/teams/{team_id}/invites")
-async def create_invite(team_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(current_user)):
+async def create_invite(team_id: str, request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(current_user)):
     t = await db.get(Team, team_id)
     if not t:
         err(404, "not_found", "Team not found")

@@ -2,8 +2,8 @@
 base_url = "http://localhost:8080"
 
 [tiers]
-claimed = ["T1"]
-pitch = "Local-first T1 hackathon portal: events, teams, invites, deadline-enforced submissions, public gallery."
+claimed = ["T1", "T2"]
+pitch = "Local-first T1+T2 hackathon portal: events, teams, invites, deadline-enforced submissions, public gallery, weighted rubrics, balanced judge assignment, judge scoring, hierarchical Crowd-BT ranking, CSV export."
 
 [auth]
 organizer = "Cookie: session=org_7f2a_local_test_token"
@@ -15,5 +15,5 @@ participant = "Cookie: session=prt_2e88_local_test_token"
 gallery = "/api/public/events/sample-hack-2026/projects"
 submit = "/api/submissions"
 judge_scores = "/api/judge/scores"
-peer_scores = "/api/judge/scores?judge=judge_a"
-csv_export = "/api/export.csv"
+peer_scores = "/api/judge/scores?judge=tomas.varga@example.org"
+csv_export = "/api/export.csv?event_id=evt_01"

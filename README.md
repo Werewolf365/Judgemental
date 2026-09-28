@@ -28,17 +28,25 @@ Stop: `docker compose down`. Clean reset: `docker compose down -v`.
 
 Stable local session tokens for the checker live in `.dogfood.toml`.
 
-## T1 scope / deferred
+## Scope (T1 + T2) / deferred
 
-Implemented: auth + DB sessions, account settings, events/dates/publish,
+T1 Implemented: auth + DB sessions, account settings, events/dates/publish,
 tracks, prizes, event join/leave, teams + captain + invites + leave
 (roster locks after submission), draft/submit/delete with UTC deadline,
 organizer submissions review with gallery hide/show moderation,
 organizer participants list, public gallery (search/filter/pagination)
 with team member names.
-Deferred: T2 judging UI/scoring/normalization, T3 voting/comments, T4
-webhooks/certificates/widgets. `judges`/`scores` fixture data is preserved
-in Postgres with no T2 behavior.
+
+T2 Implemented (see JUDGING.md): organizer rubric builder with weights,
+judge roster with load/utilization, balanced assignment (rolling on submit
+or explicit batch), judge console with draft/final scoring, judging window
+enforcement, within-judge pairwise preferences, hierarchical Crowd-BT
+ranking with judge reliability + cross-event priors, versioned model runs,
+organizer results view, CSV export.
+
+Deferred: T3 voting/comments, T4 webhooks/certificates/widgets.
+`judges`/`scores` fixture tables stay as seeded legacy data; live judging
+uses the T2 tables (DATA-MODEL.md).
 
 ## Migrations / seed
 
@@ -50,8 +58,10 @@ python -m app.seed     # idempotent; safe to run twice
 
 ## Tests
 
-- Official: `python run.py .dogfood.toml` → expect `claimed T1, verified T1`
-- Internal: `python scripts/check_t1.py` (health/seed/auth/roles/gallery/leakage)
+- Official: `python run.py .dogfood.toml` → expect `claimed T1 T2, verified T1 T2`
+- Internal T1: `python scripts/check_t1.py` (health/seed/auth/roles/gallery/leakage)
+- Internal T2: `python scripts/check_t2.py` (rubrics/assignment/scoring/lifecycle/ranking/CSV)
+- Backend unit: `docker compose exec api python -m pytest app/modules/judging/tests/ -q`
 - Frontend: `npm run build` (typecheck+lint) runs in the web image build.
 
 ## Known limitations

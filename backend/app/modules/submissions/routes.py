@@ -90,6 +90,9 @@ async def create_sub(body: ProjectCreate, db: AsyncSession = Depends(get_db), us
     team = await _check_membership(db, user.id, team_id)
     if team.event_id != event_id:
         err(422, "validation_error", "Team does not belong to event")
+    res = await db.execute(select(Project).where(Project.team_id == team_id).limit(1))
+    if res.scalar_one_or_none():
+        err(409, "already_joined", "This team already has a project — one submission per team")
     event = await db.get(Event, event_id)
     if not event:
         err(404, "not_found", "Event not found")
@@ -150,6 +153,10 @@ async def submit_proj(project_id: str, db: AsyncSession = Depends(get_db), user:
     if not p:
         err(404, "not_found", "Project not found")
     await _check_membership(db, user.id, p.team_id)
+    res = await db.execute(select(TeamMember).where(TeamMember.team_id == p.team_id, TeamMember.user_id == user.id))
+    me = res.scalar_one_or_none()
+    if not me or (me.role.value if hasattr(me.role, "value") else str(me.role)) != "CAPTAIN":
+        err(403, "forbidden", "Only the team captain can submit the project")
     if (p.status.value if hasattr(p.status, "value") else str(p.status)) == "SUBMITTED":
         err(409, "invalid_state_transition", "Already submitted")
     event = await db.get(Event, p.event_id)
@@ -165,6 +172,24 @@ async def submit_proj(project_id: str, db: AsyncSession = Depends(get_db), user:
     p.updated_at = p.submitted_at
     await db.commit()
     await db.refresh(p)
+    # Rolling judging (prompt_T2 §5): the submission becomes eligible the
+    # moment it lands. This must never fail the submission itself — the
+    # project is already committed, so any assignment failure is swallowed
+    # after a best-effort audit row (record() never raises either).
+    if event.rolling_judging:
+        try:
+            from app.modules.judging import assign as assign_svc
+            out = await assign_svc.assign_project(db, p.id)
+            await db.commit()
+            if out["ok"] and out["assigned"]:
+                await record(user, "event.assignment_created", target_type="project",
+                             target_id=p.id, event_id=p.event_id,
+                             detail={"title": p.title, "judges": out["assigned"]},
+                             request=None)
+        except Exception:
+            await db.rollback()
+            log = __import__("logging").getLogger("dogfood.judging")
+            log.exception("rolling assignment failed for project=%s", p.id)
     return {"project": proj_out(p)}
 
 @router.delete("/submissions/{project_id}")

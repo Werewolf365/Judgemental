@@ -223,7 +223,9 @@ function ParticipantHome({ me }: { me: Me }) {
                   <span className={`badge ${s.status === "SUBMITTED" ? "badge-ok" : "badge-warn"}`}><span className={`pip ${s.status === "SUBMITTED" ? "pip-green" : "pip-amber"}`} />{s.status}</span>
                 </div>
               ))}
-              <div style={{ marginTop: 12 }}><Link href="/submissions/new" className="btn">New project <I.arrow /></Link></div>
+              {teams.every((t) => subs.some((s) => s.team_id === t.id))
+                ? <p className="form-note" style={{ marginTop: 12 }}>Each of your teams already has its project — one submission per team.</p>
+                : <div style={{ marginTop: 12 }}><Link href="/submissions/new" className="btn">New project <I.arrow /></Link></div>}
             </>
           )}
         </div>
@@ -244,6 +246,10 @@ export default function Dashboard() {
     })();
   }, [router]);
   if (!ready) return <div className="card"><div className="skel" style={{ height: 200 }} /></div>;
+  // Judges cannot use the participant workspace (team creation needs event
+  // membership, which their role is refused server-side), so /dashboard
+  // forwards them to their own console instead of a dead end.
+  if (me?.role === "JUDGE") { router.push("/judge"); return <div className="card">Opening your judging console…</div>; }
   const isOrg = me?.role === "ORGANIZER" || me?.role === "ADMIN";
   return isOrg ? <OrganizerHome me={me} /> : <ParticipantHome me={me} />;
 }

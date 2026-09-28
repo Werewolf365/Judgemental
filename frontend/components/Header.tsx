@@ -10,9 +10,13 @@ export default function Header() {
   useEffect(() => { fetchMe().then(setMe); }, [path]);
 
   const isOrg = me && (me.role === "ORGANIZER" || me.role === "ADMIN");
+  const isJudge = me?.role === "JUDGE";
   // Organizers run events rather than compete: Dashboard is their mission
   // control and they have no team flow, so "My teams" would be a dead end.
-  const showTeams = me && !isOrg;
+  // Judges have their own console for the same reason: the participant
+  // workspace (teams, submissions) cannot work for an account that is
+  // refused event registration server-side.
+  const showTeams = me && !isOrg && !isJudge;
   const link = (href: string, label: string) => (
     <Link key={href} href={href} className={path === href || path.startsWith(href + "/") ? "active" : ""}>{label}</Link>
   );
@@ -32,9 +36,10 @@ export default function Header() {
           </Link>
           <nav className="main-nav" aria-label="Primary">
             {link("/events", "Events")}
-            {me && link("/dashboard", isOrg ? "Overview" : "Dashboard")}
+            {me && !isJudge && link("/dashboard", isOrg ? "Overview" : "Dashboard")}
             {showTeams && link("/teams", "My teams")}
             {isOrg && link("/organizer", "Organize")}
+            {isJudge && link("/judge", "Judging")}
             {me?.role === "ADMIN" && link("/admin", "Admin")}
           </nav>
           <div className="header-right">
