@@ -29,6 +29,7 @@ from app.models import (BayesJudgeEffect, BayesProjectResult, BayesRankOverride,
 from app.modules.auth.dependencies import require_roles
 from app.modules.events.access import managed_event
 from app.modules.judging import assign as assign_svc
+from app.modules.judging import blend as blend_mod
 from app.modules.judging import hier_score
 from app.modules.judging import service
 from app.modules.judging.schemas import RankSwapIn
@@ -182,12 +183,29 @@ async def calculate_bayes(event_id: str, request: Request,
             "n_snapshot_fallbacks": fallbacks,
             "notice": notice,
         }
+        # Judge/crowd blend (additive, after the fit): posterior scores and
+        # model ranks above are untouched. maybe_blend returns None unless
+        # voting is on, the organizer enabled the blend, and crowd ballots
+        # exist — otherwise every row below persists exactly as before.
+        blend_ctx = await blend_mod.maybe_blend(db, e)
+        blended = None
+        if blend_ctx is not None:
+            blended = {b["project_id"]: b for b in blend_mod.rank_scores(
+                blend_mod.blend({r["project_id"]: r["score"] for r in out["ranking"]},
+                                blend_ctx["voter"], blend_ctx["crowd_weight_pct"]))}
+        run.config["blend"] = ({
+            "active": True, "crowd_weight_pct": blend_ctx["crowd_weight_pct"],
+            "n_voters": blend_ctx["n_voters"], "n_ballots": blend_ctx["n_ballots"],
+        } if blend_ctx is not None else {"active": False})
         for r in out["ranking"]:
+            brow = (blended or {}).get(r["project_id"])
             db.add(BayesProjectResult(
                 model_run_id=run.id, project_id=r["project_id"],
                 score_mean=r["score"], score_sd=r["score_sd"],
                 score_lo=r["likely_range"][0], score_hi=r["likely_range"][1],
-                rank=r["rank"], p_top_k=r["p_top"], confidence=r["confidence"]))
+                rank=r["rank"], p_top_k=r["p_top"], confidence=r["confidence"],
+                blended_score=brow["blended_score"] if brow else None,
+                blended_rank=brow["blended_rank"] if brow else None))
         for j, eff in out["judge_effects"].items():
             db.add(BayesJudgeEffect(
                 model_run_id=run.id, judge_user_id=j,
@@ -229,6 +247,10 @@ async def _payload(db: AsyncSession, run: ModelRun) -> dict:
                                   ).where(BayesProjectResult.model_run_id == run.id
                                   ).order_by(BayesProjectResult.rank))
     rows = res.all()
+    # A blended run re-orders by blended_rank (manual rank overrides still
+    # apply on top via _effective_order below); blend-off runs keep model order.
+    if rows and all(r.blended_rank is not None for r, *_ in rows):
+        rows = sorted(rows, key=lambda t: (t[0].blended_rank, t[0].project_id))
     K = (run.config or {}).get("top_k", 10)
     cfg = run.config or {}
     recs = cfg.get("recommendations", [])
@@ -253,6 +275,7 @@ async def _payload(db: AsyncSession, run: ModelRun) -> dict:
             "score": r.score_mean, "score_sd": r.score_sd,
             "likely_range": [r.score_lo, r.score_hi],
             "p_top": r.p_top_k, "confidence": r.confidence,
+            "blended_score": r.blended_score, "blended_rank": r.blended_rank,
             "summary": plain})
     res2 = await db.execute(select(BayesJudgeEffect, User.display_name, User.email).join(
         User, User.id == BayesJudgeEffect.judge_user_id).where(

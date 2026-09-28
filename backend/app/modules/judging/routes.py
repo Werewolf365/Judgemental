@@ -175,6 +175,7 @@ async def judging_status(event_id: str, db: AsyncSession = Depends(get_db),
         "config": {
             "judging_open": f(e.judging_open), "judging_close": f(e.judging_close),
             "judges_per_project": e.judges_per_project, "rolling_judging": e.rolling_judging,
+            "crowd_blend_enabled": e.crowd_blend_enabled, "crowd_weight": e.crowd_weight,
         },
         "auto_assign": {
             "enabled": scheduler.state["enabled"],
@@ -210,6 +211,11 @@ async def judging_config(event_id: str, body: JudgingConfigIn, request: Request,
         e.judges_per_project = vals["judges_per_project"]
     if vals.get("rolling_judging") is not None:
         e.rolling_judging = vals["rolling_judging"]
+    # Judge/crowd blend weights (organizer-owned, persisted per event).
+    if vals.get("crowd_blend_enabled") is not None:
+        e.crowd_blend_enabled = vals["crowd_blend_enabled"]
+    if vals.get("crowd_weight") is not None:
+        e.crowd_weight = vals["crowd_weight"]
     await db.commit()
     await db.refresh(e)
     await record(user, "event.judging_configured", target_type="event", target_id=e.id,
@@ -218,6 +224,7 @@ async def judging_config(event_id: str, body: JudgingConfigIn, request: Request,
     return {"config": {
         "judging_open": f(e.judging_open), "judging_close": f(e.judging_close),
         "judges_per_project": e.judges_per_project, "rolling_judging": e.rolling_judging,
+        "crowd_blend_enabled": e.crowd_blend_enabled, "crowd_weight": e.crowd_weight,
     }}
 
 

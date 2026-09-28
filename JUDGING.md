@@ -183,6 +183,8 @@ no variance, stated in code rather than faked).
 | `theta_std` | float \| null | Laplace std (null on pre-v2 legacy runs) |
 | `confidence` | `"High"` \| `"Low"` \| null | `"Low"` when P(beats adjacent rank) < 90%; null means uncertainty was never computed (pre-0013 legacy rows), not confidence |
 | `rank` | int | Competition rank (1224 style) |
+| `blended_score` | float \| null | Judge/crowd blend output, null unless the run blended |
+| `blended_rank` | int \| null | Competition rank over blended scores, null unless the run blended |
 
 Run envelope includes:
 
@@ -191,6 +193,20 @@ Run envelope includes:
 | `converged` | bool | Whether BFGS converged |
 | `convergence_warning` | str \| null | Human-readable note when not converged |
 | `config.optimizer_diagnostics` | obj | `{nit, njev, message, grad_norm}` |
+| `config.blend` | obj | `{active, crowd_weight_pct, n_voters, n_ballots}` — `{active: false}` when the run did not blend |
+
+## Judge/crowd final-score blend
+
+Off by default; voting off always means judges alone. When the organizer
+enables it (`PATCH /events/{id}/judging` `{crowd_blend_enabled, crowd_weight}`,
+weight a 0–100 percent) and crowd ballots exist, calculate appends blended
+output without touching the model results: `final = w_judge·N(judge) +
+w_voter·N(voter)`, each side min-max normalized to [0, 1] over the ranked set
+(scales are otherwise incomparable — thetas vs 0..10 scores vs sqrt
+influence). BT blends pre-rank thetas, bayes blends direct scores; unvoted
+ranked projects count voter-raw 0; voted-but-unscored projects are excluded.
+Ranks are competition 1224. Blend-off runs write NULLs and are identical to
+before. See `judging/blend.py` (pure, unit-tested).
 
 ## Edge-case model: hierarchical Bayesian scoring (single judge per project)
 

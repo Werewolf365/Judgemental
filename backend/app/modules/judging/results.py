@@ -23,6 +23,7 @@ from app.models import (Evaluation, EvaluationStatus, JudgeAssignment, ModelJudg
                         Project, JudgeReliabilityHistory, RubricCriterion, Team, Track, User)
 from app.modules.auth.dependencies import require_roles
 from app.modules.events.access import managed_event
+from app.modules.judging import blend as blend_mod
 from app.modules.judging import crowd_bt, reliability as rel
 from app.modules.judging import service
 from app.modules.judging.pairwise import connected_components, generate_pairs
@@ -108,6 +109,16 @@ async def calculate(event_id: str, request: Request,
         # so the organizer can see what happened and decide whether to reopen.
         converged = out["converged"]
         ranking = crowd_bt.rank(out["thetas"], out.get("theta_stds"))
+        # Judge/crowd blend (additive, after the fit): thetas and ranks above
+        # are untouched. maybe_blend returns None unless voting is on, the
+        # organizer enabled the blend, and crowd ballots exist — otherwise
+        # every row below persists exactly as pre-blend runs did.
+        blend_ctx = await blend_mod.maybe_blend(db, e)
+        blended = None
+        if blend_ctx is not None:
+            blended = {b["project_id"]: b for b in blend_mod.rank_scores(
+                blend_mod.blend({r["project_id"]: r["theta"] for r in ranking},
+                                blend_ctx["voter"], blend_ctx["crowd_weight_pct"]))}
         res2 = await db.execute(select(RubricCriterion).where(RubricCriterion.event_id == e.id))
         crits = [c for c in res2.scalars().all() if c.is_active]
         weights = service.resolve_weights(crits) if crits else {}
@@ -122,6 +133,10 @@ async def calculate(event_id: str, request: Request,
             "judges_per_project": e.judges_per_project,
             "n_submitted_evaluations": len(evals),
         }
+        run.config["blend"] = ({
+            "active": True, "crowd_weight_pct": blend_ctx["crowd_weight_pct"],
+            "n_voters": blend_ctx["n_voters"], "n_ballots": blend_ctx["n_ballots"],
+        } if blend_ctx is not None else {"active": False})
         if not converged:
             run.config["convergence_warning"] = (
                 "Optimizer did not converge — ranking is best-effort. "
@@ -138,11 +153,14 @@ async def calculate(event_id: str, request: Request,
             # When optimizer did not converge, every position is Low confidence
             # regardless of what the adjacent-rank probability says.
             confidence = "Low" if not converged else r.get("confidence", "High")
+            brow = (blended or {}).get(r["project_id"])
             db.add(ModelProjectResult(
                 model_run_id=run.id, project_id=r["project_id"],
                 theta=r["theta"], rank=r["rank"],
                 theta_std=r.get("theta_std"),
                 confidence=confidence,
+                blended_score=brow["blended_score"] if brow else None,
+                blended_rank=brow["blended_rank"] if brow else None,
             ))
         for j in judges:
             db.add(ModelJudgeResult(model_run_id=run.id, judge_user_id=j,
@@ -178,7 +196,7 @@ async def calculate(event_id: str, request: Request,
     await record(user, "event.results_calculated", target_type="model_run",
                  target_id=run_id, event_id=e.id,
                  detail={"projects": len(pair_projects), "judges": len(judges),
-                         "comparisons": len(pairs)}, request=request)
+                         "comparisons": len(pairs), "blend": blended is not None}, request=request)
     return {"run_id": run_id, "projects": len(pair_projects),
             "judges": len(judges), "comparisons": len(pairs)}
 
@@ -190,10 +208,16 @@ async def _run_payload(db: AsyncSession, run: ModelRun) -> dict:
                                   ).join(Track, Track.id == Project.track_id
                                   ).where(ModelProjectResult.model_run_id == run.id
                                   ).order_by(ModelProjectResult.rank))
+    rows = res.all()
+    # A blended run re-orders by blended_rank; blend-off runs keep BT order.
+    # Sorting in Python keeps the SQL identical for the common case.
+    if rows and all(r.blended_rank is not None for r, *_ in rows):
+        rows = sorted(rows, key=lambda t: (t[0].blended_rank, t[0].project_id))
     ranking = [{"rank": r.rank, "project_id": r.project_id, "title": title,
                 "team": team, "track": track, "theta": r.theta,
-                "theta_std": r.theta_std, "confidence": r.confidence}
-               for r, title, team, track in res.all()]
+                "theta_std": r.theta_std, "confidence": r.confidence,
+                "blended_score": r.blended_score, "blended_rank": r.blended_rank}
+               for r, title, team, track in rows]
     res2 = await db.execute(select(ModelJudgeResult, User.display_name, User.email).join(
         User, User.id == ModelJudgeResult.judge_user_id).where(
         ModelJudgeResult.model_run_id == run.id).order_by(

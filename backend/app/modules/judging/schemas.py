@@ -50,6 +50,8 @@ class JudgingConfigIn(BaseModel):
     judging_close: Optional[str] = None
     judges_per_project: Optional[int] = Field(default=None, ge=1, le=10)
     rolling_judging: Optional[bool] = None
+    crowd_blend_enabled: Optional[bool] = None
+    crowd_weight: Optional[float] = Field(default=None, ge=0, le=100)
 
 
 class JudgeAssignIn(BaseModel):

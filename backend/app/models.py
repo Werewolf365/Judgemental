@@ -122,6 +122,11 @@ class Event(Base):
     voting_close = Column(DateTime(timezone=True), nullable=True)
     voting_mode = Column(Text, nullable=False, default="auth", server_default="auth")
     comments_visibility = Column(Text, nullable=False, default="public", server_default="public")
+    # --- Judge/crowd final-score blend (organizer-owned). Off by default:
+    # blend-off runs behave exactly as before. crowd_weight is a percent
+    # (0-100); the judges' share is always 100 minus it, never stored.
+    crowd_blend_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
+    crowd_weight = Column(Float, nullable=False, default=30, server_default="30")
     created_by = Column(Text, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
@@ -414,9 +419,13 @@ class ModelProjectResult(Base):
     theta_std = Column(Float, nullable=True)
     # 'High' or 'Low': whether this project's rank is a confident verdict or
     # a close call (P(A beats adjacent rank) < 90%). NULL means uncertainty
-    # was never computed (pre-0013 legacy rows) — unknown, not confident.
+    # was never computed (pre-0013 legacy rows) - unknown, not confident.
     # New runs always write a real value; nothing may default this to High.
     confidence = Column(Text, nullable=True)
+    # Judge/crowd blend output (migration 0018). NULL unless the run blended:
+    # blend-off runs are byte-identical to before this existed.
+    blended_score = Column(Float, nullable=True)
+    blended_rank = Column(Integer, nullable=True)
 
 class ModelJudgeResult(Base):
     __tablename__ = "model_judge_results"
@@ -467,6 +476,9 @@ class BayesProjectResult(Base):
     rank = Column(Integer, nullable=False)
     p_top_k = Column(Float, nullable=False)
     confidence = Column(Text, nullable=False, default="Low")
+    # Judge/crowd blend output (migration 0018). NULL unless the run blended.
+    blended_score = Column(Float, nullable=True)
+    blended_rank = Column(Integer, nullable=True)
 
 
 class BayesJudgeEffect(Base):

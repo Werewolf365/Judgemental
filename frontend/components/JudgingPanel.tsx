@@ -22,31 +22,32 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
   const [runs, setRuns] = useState<any[]>([]);
   const [msg, setMsg] = useState("");
   const [settingsSaved, setSettingsSaved] = useState("");
-  // Final-score blend (UI only for now): whether crowd votes count and at
-  // what weight. Stored per event in this browser; the math wires up later.
-  const loadBlend = (id: string) => {
-    try {
-      const p = JSON.parse(localStorage.getItem(`blend:${id}`) || "");
-      if (p && typeof p.crowdPct === "number")
-        return { enabled: !!p.enabled, crowdPct: Math.min(100, Math.max(0, Math.round(p.crowdPct))) };
-    } catch { /* fresh defaults */ }
-    return { enabled: false, crowdPct: 30 };
-  };
-  const [blend, setBlend] = useState(loadBlend(eventId));
+  // Final-score blend: whether crowd votes count and at what weight.
+  // Persisted on the event via the judging-config endpoint; the next
+  // calculation blends with these weights.
+  const [blend, setBlend] = useState({ enabled: false, crowdPct: 30 });
+  const [blendSaved, setBlendSaved] = useState("");
   const [crowd, setCrowd] = useState<any[]>([]);
   const [votingOn, setVotingOn] = useState(false);
+  function touchBlend(patch: Partial<{ enabled: boolean; crowdPct: number }>) {
+    setBlend((b) => ({ ...b, ...patch }));
+    setBlendSaved("");
+  }
+  async function saveBlend() {
+    setMsg(""); setBusy(true);
+    try {
+      await api(`/events/${eventId}/judging`, { method: "PATCH", body: JSON.stringify({
+        crowd_blend_enabled: blend.enabled, crowd_weight: blend.crowdPct,
+      }) });
+      setBlendSaved(`Blend saved ✓ ${new Date().toLocaleTimeString()}`);
+      await load();
+    } catch (e: any) { setMsg(e.message); }
+    finally { setBusy(false); }
+  }
   useEffect(() => {
-    setBlend(loadBlend(eventId));
     api(`/events/${eventId}/voting/standings`).then((s) => setCrowd(s?.ranking || [])).catch(() => setCrowd([]));
     api(`/events/${eventId}/voting`).then((v) => setVotingOn(!!v?.config?.voting_enabled)).catch(() => setVotingOn(false));
   }, [eventId]);
-  function saveBlend(patch: Partial<{ enabled: boolean; crowdPct: number }>) {
-    setBlend((b) => {
-      const n = { ...b, ...patch };
-      try { localStorage.setItem(`blend:${eventId}`, JSON.stringify(n)); } catch { /* private mode */ }
-      return n;
-    });
-  }
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ title: string; body: React.ReactNode } | null>(null);
 
@@ -70,6 +71,9 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
     try {
       const st = await api(`/events/${eventId}/judging`);
       setStatus(st);
+      setBlend({ enabled: !!st.config.crowd_blend_enabled,
+                 crowdPct: st.config.crowd_weight ?? 30 });
+      setBlendSaved("");
       setSOpen(st.config.judging_open ? st.config.judging_open.slice(0, 16) : "");
       setSClose(st.config.judging_close ? st.config.judging_close.slice(0, 16) : "");
       setSPer(st.config.judges_per_project);
@@ -297,15 +301,15 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
             <h3 style={{ marginTop: 0 }}>Final score blend</h3>
             <p className="form-note" style={{ marginTop: 0 }}>Decide whether crowd votes count toward the final score, and how much weight they carry against the judges.</p>
             <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14.5 }}>
-              <input type="checkbox" checked={blend.enabled} onChange={(e) => saveBlend({ enabled: e.target.checked })} style={{ width: "auto", margin: 0 }} />
+              <input type="checkbox" checked={blend.enabled} onChange={(e) => touchBlend({ enabled: e.target.checked })} style={{ width: "auto", margin: 0 }} />
               Count crowd votes in the final score
             </label>
             <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
               <label htmlFor="crowd-wt" style={{ fontSize: 14 }}>Crowd weight</label>
               <input id="crowd-wt" type="range" min={0} max={100} step={5} value={blend.crowdPct}
-                onChange={(e) => saveBlend({ crowdPct: Number(e.target.value) })} style={{ flex: "1 1 160px" }} />
+                onChange={(e) => touchBlend({ crowdPct: Number(e.target.value) })} style={{ flex: "1 1 160px" }} />
               <input type="number" min={0} max={100} value={blend.crowdPct} aria-label="Crowd weight percent"
-                onChange={(e) => saveBlend({ crowdPct: Math.min(100, Math.max(0, Math.round(Number(e.target.value) || 0))) })}
+                onChange={(e) => touchBlend({ crowdPct: Math.min(100, Math.max(0, Math.round(Number(e.target.value) || 0))) })}
                 style={{ width: 72 }} />
               <span className="badge badge-track">Judges {100 - blend.crowdPct}% · Crowd {blend.crowdPct}%</span>
             </div>
@@ -321,7 +325,9 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
             ) : (
               <p className="form-note">No crowd votes to weigh yet — standings appear here once voting starts.</p>
             )}
-            <p className="form-note">Saved in this browser only for now. Blending takes effect on a future calculation — changing these recalculates nothing today.</p>
+            <p className="form-note">Saved on the event — the next calculation blends judge scores with crowd influence at these weights. Voting off means judges alone, whatever is set here.</p>
+            <div style={{ marginTop: 8 }}><button className="btn btn-sm" disabled={busy} onClick={saveBlend}>Save blend</button></div>
+            {blendSaved && <p className="form-note" role="status" style={{ color: "var(--leaf-deep)", fontWeight: 700 }}>{blendSaved} — the next calculation uses it.</p>}
           </div>
           )}
         </div>
