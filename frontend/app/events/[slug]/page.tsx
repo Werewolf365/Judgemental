@@ -270,9 +270,14 @@ export default function EventPage({ params }: { params: { slug: string } }) {
           <p>{ev.description || "A Dogfood hackathon event."}</p>
           <div className="hero-cta">
             {isStaff ? (
-              <span className="badge badge-track" title="Organizers, admins and judges run events instead of competing in them.">
-                <I.team /> {me?.role} — you run events, not compete in them
-              </span>
+              <>
+                <span className="badge badge-track" title="Organizers, admins and judges run events instead of competing in them.">
+                  <I.team /> {me?.role} — you run events, not compete in them
+                </span>
+                {(me?.role === "ORGANIZER" || me?.role === "ADMIN") && (
+                  <Link href={`/organizer?event=${ev.id}`} className="btn">Edit event <I.arrow /></Link>
+                )}
+              </>
             ) : (
               <button className="btn" onClick={handleJoinClick} disabled={busy || joined}>{busy ? "Joining…" : joined ? "You're registered" : me ? "Join this event" : "Log in to join"} <I.arrow /></button>
             )}
