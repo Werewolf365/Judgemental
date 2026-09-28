@@ -22,6 +22,31 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
   const [runs, setRuns] = useState<any[]>([]);
   const [msg, setMsg] = useState("");
   const [settingsSaved, setSettingsSaved] = useState("");
+  // Final-score blend (UI only for now): whether crowd votes count and at
+  // what weight. Stored per event in this browser; the math wires up later.
+  const loadBlend = (id: string) => {
+    try {
+      const p = JSON.parse(localStorage.getItem(`blend:${id}`) || "");
+      if (p && typeof p.crowdPct === "number")
+        return { enabled: !!p.enabled, crowdPct: Math.min(100, Math.max(0, Math.round(p.crowdPct))) };
+    } catch { /* fresh defaults */ }
+    return { enabled: false, crowdPct: 30 };
+  };
+  const [blend, setBlend] = useState(loadBlend(eventId));
+  const [crowd, setCrowd] = useState<any[]>([]);
+  const [votingOn, setVotingOn] = useState(false);
+  useEffect(() => {
+    setBlend(loadBlend(eventId));
+    api(`/events/${eventId}/voting/standings`).then((s) => setCrowd(s?.ranking || [])).catch(() => setCrowd([]));
+    api(`/events/${eventId}/voting`).then((v) => setVotingOn(!!v?.config?.voting_enabled)).catch(() => setVotingOn(false));
+  }, [eventId]);
+  function saveBlend(patch: Partial<{ enabled: boolean; crowdPct: number }>) {
+    setBlend((b) => {
+      const n = { ...b, ...patch };
+      try { localStorage.setItem(`blend:${eventId}`, JSON.stringify(n)); } catch { /* private mode */ }
+      return n;
+    });
+  }
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ title: string; body: React.ReactNode } | null>(null);
 
@@ -266,6 +291,38 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
               </div>
               <div style={{ marginTop: 10 }}><button className="btn" type="submit" disabled={busy}>Add criterion</button></div>
             </form>
+          )}
+          {votingOn && (
+          <div className="card field" style={{ margin: "14px 0 0" }}>
+            <h3 style={{ marginTop: 0 }}>Final score blend</h3>
+            <p className="form-note" style={{ marginTop: 0 }}>Decide whether crowd votes count toward the final score, and how much weight they carry against the judges.</p>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14.5 }}>
+              <input type="checkbox" checked={blend.enabled} onChange={(e) => saveBlend({ enabled: e.target.checked })} style={{ width: "auto", margin: 0 }} />
+              Count crowd votes in the final score
+            </label>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+              <label htmlFor="crowd-wt" style={{ fontSize: 14 }}>Crowd weight</label>
+              <input id="crowd-wt" type="range" min={0} max={100} step={5} value={blend.crowdPct}
+                onChange={(e) => saveBlend({ crowdPct: Number(e.target.value) })} style={{ flex: "1 1 160px" }} />
+              <input type="number" min={0} max={100} value={blend.crowdPct} aria-label="Crowd weight percent"
+                onChange={(e) => saveBlend({ crowdPct: Math.min(100, Math.max(0, Math.round(Number(e.target.value) || 0))) })}
+                style={{ width: 72 }} />
+              <span className="badge badge-track">Judges {100 - blend.crowdPct}% · Crowd {blend.crowdPct}%</span>
+            </div>
+            {crowd.length ? (
+              <div style={{ marginTop: 8 }}>
+                {crowd.map((r: any) => (
+                  <div key={r.project_id} style={{ display: "flex", gap: 10, padding: "6px 0", borderTop: "1px solid var(--line)", fontSize: 13.5 }}>
+                    <span className="badge badge-track">#{r.rank}</span>
+                    <b>{r.title}</b>
+                    <span style={{ marginLeft: "auto", color: "var(--muted)" }}>{r.votes} vote{r.votes === 1 ? "" : "s"} · influence {Number(r.influence).toFixed(2)}</span>
+                  </div>))}
+              </div>
+            ) : (
+              <p className="form-note">No crowd votes to weigh yet — standings appear here once voting starts.</p>
+            )}
+            <p className="form-note">Saved in this browser only for now. Blending takes effect on a future calculation — changing these recalculates nothing today.</p>
+          </div>
           )}
         </div>
       )}
