@@ -14,6 +14,7 @@ from app.modules.gallery.routes import router as gallery_router
 from app.modules.judging.routes import router as judging_router
 from app.modules.judging.judge import router as judge_router
 from app.modules.judging.results import router as results_router
+from app.modules.judging.bayes import router as bayes_router
 from app.modules.voting.routes import router as voting_router
 from app.modules.judging import scheduler as auto_assign
 
@@ -47,6 +48,7 @@ app.include_router(gallery_router)
 app.include_router(judging_router)
 app.include_router(judge_router)
 app.include_router(results_router)
+app.include_router(bayes_router)
 app.include_router(voting_router)
 
 @app.get("/projects")

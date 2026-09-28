@@ -203,3 +203,47 @@ printed doc values) rest on unidentified scale, quadratic vote-stuffing by
 prolific judges, MAP-only certainty, and mean-only history. Treat current
 output as a **reasonable ordinal heuristic**, not a calibrated Bayesian
 measurement. Adopting §7 items 1–4 would promote it to the latter.
+
+---
+
+## 9. v2 update — what changed (crowd-bt-map-v2, migration 0013)
+
+Date: 2026-09-27. Code changed: `crowd_bt.py` (complete rewrite),
+`results.py`, `assign.py`, `models.py`, migration `0013_theta_std`.
+42/42 tests pass.
+
+### Flaws addressed
+
+| Flaw | Was | Now |
+|------|-----|-----|
+| **F1 (scale non-identifiability)** | Partially: only translation fixed (reference=0) | **Improved**: sum-to-zero constraint applied post-fit. Mean of all θ (including reference) subtracted before returning. Thetas are now symmetric and recalc-stable. The θ→kθ, r→r/k ridge remains (weak priors only), but origin is no longer arbitrary. |
+| **F5 (MAP-only, no uncertainty)** | `posterior_sigma` NULL, ranks presented as definitive | **Fixed**: Laplace approximation via `res.hess_inv` diagonal. `theta_std` per project stored in `model_project_results`. `rank()` computes `P(A>B) = σ(Δθ/√(σ²_A+σ²_B))`. Adjacent pairs with P < 90% flagged `confidence: "Low"` and `close_call_with_next: true`. |
+| **F9 (optimizer fragility — convergence)** | `not out["success"]` → `RuntimeError` → 500, FAILED run | **Fixed**: best-found BFGS point used on non-convergence. `confidence: "Low"` on every rank. `convergence_warning` + `optimizer_diagnostics` (nit, njev, grad_norm) stored in `run.config`. Run status stays SUCCEEDED. |
+| **F9 (optimizer fragility — gradient)** | Numerical finite-difference gradient (slow, ~O(n) extra evaluations per step) | **Fixed**: analytic gradient supplied via `jac=grad_only`. ~10–50× fewer function evaluations at competition scale. 40P/30J now tractable. |
+
+### Flaws still open
+
+| Flaw | Status | See |
+|------|--------|-----|
+| **F1 (θ→kθ scale ridge)** | Open — weak priors still the only anchor | FW-1 in JUDGING.md |
+| **F2 (reliability herding)** | Open | FW-3 |
+| **F3 (quadratic dominance)** | Open | FW-2 |
+| **F4 (single-obs reliability)** | Open — minimum-evidence suppression not yet added | FW-3 |
+| **F6 (multiplicative strictness)** | Open | — |
+| **F7 (mean-only history)** | Open | FW-5 |
+| **F8 (tie model)** | Open | FW-6 |
+| **F9 (multi-start)** | Open | FW-4 |
+
+### New health signal
+
+`assignment_health` now includes a `bridge_strength` checklist item that
+counts shared judges for every directly-connected project pair. Warns when any
+pair shares only 1 judge (single-judge bridges → near-flat likelihood direction).
+This is a read-only diagnostic; enforcement in assignment is FW-1.
+
+### Remaining audit notes still valid
+
+All pen-test items (§5) remain: synchronous DoS, unit-weight assertion inside
+`fit()`, CSV formula injection, NULL score silent drop, concurrent history race.
+Priority: medium (CSV injection is the most organizer-visible).
+

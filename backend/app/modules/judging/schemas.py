@@ -50,3 +50,37 @@ class JudgeAssignIn(BaseModel):
     @classmethod
     def _user_id(cls, v):
         return (v or "").strip() or None
+
+
+class ManualAssignIn(BaseModel):
+    """Organizer-picked judge→project assignment from the existing pool."""
+    project_id: str = Field(max_length=64)
+    judge_user_id: str = Field(max_length=64)
+
+    @field_validator("project_id", "judge_user_id")
+    @classmethod
+    def _nonempty(cls, v):
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("project_id and judge_user_id are both required")
+        return v
+
+
+class RankSwapIn(BaseModel):
+    """Interchange two ranks in the latest Bayesian scoring run."""
+    project_a_id: str = Field(max_length=64)
+    project_b_id: str = Field(max_length=64)
+    reason: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("project_a_id", "project_b_id")
+    @classmethod
+    def _nonempty(cls, v):
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("both project ids are required")
+        return v
+
+    @field_validator("reason")
+    @classmethod
+    def _reason(cls, v):
+        return (v or "").strip() or None

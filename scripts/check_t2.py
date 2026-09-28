@@ -233,6 +233,19 @@ check("cross-link batch fills the other judge", s == 200 and b["assignments_crea
 ok = _score_all(JA) and _score_all(JB)
 check("cross-linked evaluations submitted (unanimous design)", ok)
 
+# ---- balance report: connectivity + checklist on the healthy event ----
+s, b = J(f"/events/{EV}/assignments/batch", O, "POST", {})
+check("batch report carries connectivity (connected, no repairs needed)",
+      s == 200 and b.get("connected") is True and b.get("repairs") == []
+      and b.get("assignments_created") == 0, f"got {s} {b}")
+s, b = J(f"/events/{EV}/judges", O)
+bal = b.get("balance", {})
+check("event balance healthy (spread 0, connected, checklist all ok)",
+      bal.get("connected") is True and bal.get("workload", {}).get("spread") == 0
+      and len(bal.get("checklist", [])) == 5
+      and all(i["level"] == "ok" for i in bal.get("checklist", [])),
+      f"{bal}")
+
 # ---- deadline blocks scoring ----
 J(f"/events/{EV}/judging", O, "PATCH", {"judging_close": "2020-01-01T00:00:00Z"})
 _, mine = J("/judge/assignments", JA)
@@ -308,6 +321,51 @@ order2 = [r["title"] for r in b.get("ranking", [])] if s == 200 else []
 src = list(b.get("run", {}).get("config", {}).get("priors", {}).values())[0]["source"] if s == 200 else None
 check("unweighted ranking H1 first", order2 == ["H1", "H2"], f"{order2}")
 check("second event inherits HISTORICAL prior", src == "HISTORICAL", f"got {src}")
+
+# ---- repair: a split graph merges via swaps ----
+# Fresh event so the split is fully controlled: JA+JB cover R1/R2 first,
+# then two new judges cover only R3/R4, leaving two islands the fill cannot
+# heal (old projects are already full). Batch must merge them with one swap.
+s, b = J("/events", O, "POST", {"name": "T2 Repair", "slug": f"t2-repair-{RUN}",
+                                "submissions_close": "2030-01-01T00:00:00Z"})
+EV3 = b["event"]["id"] if s == 200 else None
+check("repair probe event created", EV3 is not None, f"got {s}")
+s, b = J(f"/events/{EV3}/tracks", O, "POST", {"name": "T"})
+TRK3 = b["track"]["id"] if s == 200 else None
+J(f"/events/{EV3}/judging", O, "PATCH", {"judges_per_project": 2, "rolling_judging": False})
+J(f"/events/{EV3}/judges", O, "POST", {"email": me_a["user"]["email"]})
+J(f"/events/{EV3}/judges", O, "POST", {"email": me_b["user"]["email"]})
+RIDS = []
+for (header, email), title in zip(MEMBERS[:2], ("T2 R1", "T2 R2")):
+    pid = join_team_project(header, email, EV3, TRK3, f"T2 Repair {title}", title, summary="r")
+    RIDS.append(pid)
+    if pid:
+        req(f"/submissions/{pid}/submit", header, "POST", {})
+s, b = J(f"/events/{EV3}/assignments/batch", O, "POST", {})
+check("first pair fully covered by the first judges", s == 200 and b.get("assignments_created") == 4, f"got {s} {b}")
+JH = []
+for i in (1, 2):
+    em = f"t2repj{i}{RUN}@local.test"
+    h = mkuser(em, f"T2 Repair Judge {i}")
+    s, _ = J("/admin/users/role", A, "POST", {"email": em, "role": "JUDGE"})
+    JH.append(h if s == 200 and h else None)
+    s, _ = J(f"/events/{EV3}/judges", O, "POST", {"email": em})
+check("two more judges rostered", all(JH), f"{JH}")
+for (header, email), title in zip(MEMBERS[2:], ("T2 R3", "T2 R4")):
+    pid = join_team_project(header, email, EV3, TRK3, f"T2 Repair {title}", title, summary="r")
+    RIDS.append(pid)
+    if pid:
+        req(f"/submissions/{pid}/submit", header, "POST", {})
+s, b = J(f"/events/{EV3}/assignments/batch", O, "POST", {})
+check("split graph repaired with exactly one swap",
+      s == 200 and b.get("assignments_created") == 4 and len(b.get("repairs", [])) == 1
+      and b.get("connected") is True, f"got {s} {b}")
+s, b = J(f"/events/{EV3}/judges", O)
+bal3 = b.get("balance", {})
+cov3 = bal3.get("coverage", {})
+check("repaired event fully covered and connected",
+      bal3.get("connected") is True and bal3.get("components") == 1
+      and cov3.get("min") == 2 and cov3.get("max") == 2, f"{bal3}")
 
 print("INTERNAL T2 verification")
 ok_all = True

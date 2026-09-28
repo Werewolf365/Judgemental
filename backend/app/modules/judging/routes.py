@@ -15,7 +15,7 @@ from app.modules.events.routes import parse_dt
 from app.modules.judging import assign as assign_svc
 from app.modules.judging import scheduler
 from app.modules.judging import service
-from app.modules.judging.schemas import CriterionIn, JudgingConfigIn, JudgeAssignIn
+from app.modules.judging.schemas import CriterionIn, JudgingConfigIn, JudgeAssignIn, ManualAssignIn
 from app.shared.audit import record
 from app.shared.errors import err
 import uuid
@@ -135,6 +135,7 @@ async def judging_status(event_id: str, db: AsyncSession = Depends(get_db),
                          user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
     """Config + derived stage + counts. The console renders from this."""
     from app.models import EventJudge, JudgeAssignment, Evaluation, EvaluationStatus
+    from app.modules.judging.pairwise import connected_components, generate_pairs
     from sqlalchemy import func
     e = await managed_event(db, user, event_id)
     judges = (await db.execute(select(func.count()).select_from(EventJudge).where(
@@ -145,6 +146,24 @@ async def judging_status(event_id: str, db: AsyncSession = Depends(get_db),
         Evaluation.event_id == e.id,
         Evaluation.status == EvaluationStatus.SUBMITTED))).scalar() or 0
     res = await db.execute(select(RubricCriterion).where(RubricCriterion.event_id == e.id))
+    # Model routing for the console: the Uncertainty tab appears only when
+    # Bradley–Terry cannot run (no pairs, or a disconnected graph) — never
+    # alongside a viable BT ranking. A past Bayesian run keeps the tab visible
+    # so its history is never orphaned.
+    sub = (await db.execute(select(Evaluation).where(
+        Evaluation.event_id == e.id,
+        Evaluation.status == EvaluationStatus.SUBMITTED))).scalars().all()
+    rows = [{"judge_user_id": v.judge_user_id, "project_id": v.project_id,
+             "weighted_score": v.weighted_score, "evaluation_id": v.id}
+            for v in sub if v.weighted_score is not None]
+    pairs = generate_pairs(rows)
+    bt_viable = False
+    if pairs:
+        projs = sorted({p["winner_project_id"] for p in pairs} |
+                       {p["loser_project_id"] for p in pairs})
+        bt_viable = len(connected_components(pairs, projs)) == 1
+    bayes_ready = await service.latest_succeeded_run(
+        db, e.id, model_prefix="hier-bayes-score") is not None
     f = lambda x: x.isoformat() if x else None
     return {
         "config": {
@@ -159,6 +178,7 @@ async def judging_status(event_id: str, db: AsyncSession = Depends(get_db),
         },
         "stage": await service.judging_stage(db, e),
         "rubric_locked": await service.rubric_locked(db, e),
+        "models": {"bt_viable": bt_viable, "bayes_ready": bayes_ready},
         "counts": {
             "judges": judges, "assignments": assignments,
             "evaluations_submitted": completed,
@@ -205,7 +225,8 @@ async def judging_config(event_id: str, body: JudgingConfigIn, request: Request,
 async def list_judges(event_id: str, db: AsyncSession = Depends(get_db),
                       user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
     e = await managed_event(db, user, event_id)
-    return {"judges": await assign_svc.utilization(db, e.id)}
+    return {"judges": await assign_svc.utilization(db, e.id),
+            "balance": await assign_svc.assignment_health(db, e.id)}
 
 
 @router.post("/events/{event_id}/judges")
@@ -278,4 +299,26 @@ async def batch_assign(event_id: str, request: Request,
     await db.commit()
     await record(user, "event.assignments_batched", target_type="event", target_id=e.id,
                  event_id=e.id, detail=out, request=request)
+    return {"ok": True, **out}
+
+
+@router.post("/events/{event_id}/assignments/manual")
+async def manual_assign(event_id: str, body: ManualAssignIn, request: Request,
+                        db: AsyncSession = Depends(get_db),
+                        user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
+    """Organizer-picked judge→project assignment from the existing pool.
+
+    Names one eligible roster judge for one submitted project — the close-call
+    workflow (extra judging exactly where uncertainty is highest). Refuses
+    closed windows, non-pool judges, and duplicate live pairs. May exceed
+    judges_per_project: extra judging is the point, not a coverage fill.
+    """
+    e = await managed_event(db, user, event_id)
+    out = await assign_svc.assign_judge_to_project(
+        db, e.id, body.project_id, body.judge_user_id)
+    await db.commit()
+    await record(user, "event.assignment_manual", target_type="project",
+                 target_id=body.project_id, event_id=e.id,
+                 detail={"judge": out["assignment"]["judge_user_id"]},
+                 request=request)
     return {"ok": True, **out}

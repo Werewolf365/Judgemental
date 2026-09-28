@@ -42,7 +42,10 @@ judge roster with load/utilization, balanced assignment (rolling on submit
 or explicit batch), judge console with draft/final scoring, judging window
 enforcement, within-judge pairwise preferences, hierarchical Crowd-BT
 ranking with judge reliability + cross-event priors, versioned model runs,
-organizer results view, CSV export.
+organizer results view, CSV export. Edge case (one judge per project):
+hierarchical Bayesian scorer with Top-K uncertainty view, organizer rank
+interchange with revert, and manual extra-judging assignment from the
+existing pool.
 
 T3 Implemented (see VOTING.md): opt-in public voting with organizer-set
 mode (open link / email-gated / authenticated) and end deadline, 10 votes

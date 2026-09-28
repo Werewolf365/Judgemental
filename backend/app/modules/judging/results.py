@@ -81,7 +81,9 @@ async def calculate(event_id: str, request: Request,
         stranded = sorted([sorted(c) for c in comps], key=len)[0]
         err(422, "validation_error",
             f"Comparison graph is disconnected: {len(stranded)} project(s) share no judge with the rest "
-            f"({', '.join(stranded[:5])}), so they cannot be placed on one common scale")
+            f"({', '.join(stranded[:5])}), so they cannot be placed on one common scale. "
+            f"If each project has only one judge, use the edge-case Bayesian scoring model instead: "
+            f"POST /events/{event_id}/bayes/calculate")
     # Deterministic origin: lexicographically smallest ranked project.
     reference = pair_projects[0]
     judges = sorted({p["judge_user_id"] for p in pairs})
@@ -100,21 +102,32 @@ async def calculate(event_id: str, request: Request,
     try:
         out = crowd_bt.fit(pairs, pair_projects, judges,
                            reference_project=reference, priors=priors)
-        if not out["success"]:
-            raise RuntimeError("optimizer did not converge")
-        ranking = crowd_bt.rank(out["thetas"], reference)
+        # #7 Degrade-not-fail: non-convergence is a degraded result, not a
+        # fatal error. The best-found point from BFGS is still a useful
+        # estimate; we flag every rank as Low confidence and store diagnostics
+        # so the organizer can see what happened and decide whether to reopen.
+        converged = out["converged"]
+        ranking = crowd_bt.rank(out["thetas"], out.get("theta_stds"))
         res2 = await db.execute(select(RubricCriterion).where(RubricCriterion.event_id == e.id))
         crits = [c for c in res2.scalars().all() if c.is_active]
         weights = service.resolve_weights(crits) if crits else {}
         run.config = {
             "model_version": out["model_version"], "theta_sigma": crowd_bt.THETA_SIGMA,
             "reference_project": reference,
+            "converged": converged,
+            "optimizer_diagnostics": out.get("optimizer_diagnostics", {}),
             "priors": {j: {"mu": priors[j][0], "sigma": priors[j][1], "source": prior_src[j]} for j in judges},
             "rubric": [{"id": c.id, "name": c.name, "weight": c.weight,
                         "normalized": weights.get(c.id)} for c in crits],
             "judges_per_project": e.judges_per_project,
             "n_submitted_evaluations": len(evals),
         }
+        if not converged:
+            run.config["convergence_warning"] = (
+                "Optimizer did not converge — ranking is best-effort. "
+                "All positions are marked Low confidence. "
+                "Consider adding more judges or using analytic gradient (already enabled in v2)."
+            )
         for p in pairs:
             db.add(PairwiseObservation(
                 id=f"pwo_{uuid.uuid4().hex[:8]}", model_run_id=run.id,
@@ -122,15 +135,20 @@ async def calculate(event_id: str, request: Request,
                 loser_project_id=p["loser_project_id"], weight=1.0,
                 source_evaluation_ids=p["source_evaluation_ids"]))
         for r in ranking:
-            db.add(ModelProjectResult(model_run_id=run.id, project_id=r["project_id"],
-                                      theta=r["theta"], rank=r["rank"]))
+            # When optimizer did not converge, every position is Low confidence
+            # regardless of what the adjacent-rank probability says.
+            confidence = "Low" if not converged else r.get("confidence", "High")
+            db.add(ModelProjectResult(
+                model_run_id=run.id, project_id=r["project_id"],
+                theta=r["theta"], rank=r["rank"],
+                theta_std=r.get("theta_std"),
+                confidence=confidence,
+            ))
         for j in judges:
             db.add(ModelJudgeResult(model_run_id=run.id, judge_user_id=j,
                                     r=out["reliabilities"][j],
                                     prior_mu=priors[j][0], prior_sigma=priors[j][1],
                                     posterior_mu=out["log_reliabilities"][j]))
-            # The Bayesian chain, persisted: this posterior is the next
-            # competition's prior.
             db.add(JudgeReliabilityHistory(
                 id=f"rel_{uuid.uuid4().hex[:8]}", judge_user_id=j, event_id=e.id,
                 model_run_id=run.id, posterior_mu=out["log_reliabilities"][j],
@@ -140,6 +158,7 @@ async def calculate(event_id: str, request: Request,
         run.n_projects, run.n_judges, run.n_comparisons = (
             len(pair_projects), len(judges), len(pairs))
         await db.commit()
+
     except Exception as ex:
         # The whole attempt rolls back; then a fresh FAILED row (same id, so
         # the audit trail can reference the attempt) is committed on its own
@@ -172,7 +191,8 @@ async def _run_payload(db: AsyncSession, run: ModelRun) -> dict:
                                   ).where(ModelProjectResult.model_run_id == run.id
                                   ).order_by(ModelProjectResult.rank))
     ranking = [{"rank": r.rank, "project_id": r.project_id, "title": title,
-                "team": team, "track": track, "theta": r.theta}
+                "team": team, "track": track, "theta": r.theta,
+                "theta_std": r.theta_std, "confidence": r.confidence}
                for r, title, team, track in res.all()]
     res2 = await db.execute(select(ModelJudgeResult, User.display_name, User.email).join(
         User, User.id == ModelJudgeResult.judge_user_id).where(
@@ -183,15 +203,19 @@ async def _run_payload(db: AsyncSession, run: ModelRun) -> dict:
                "prior_sigma": r.prior_sigma, "posterior_mu": r.posterior_mu}
               for r, name, email in res2.all()]
     f = lambda x: x.isoformat() if x else None
+    cfg = run.config or {}
     return {
         "run": {"id": run.id, "event_id": run.event_id,
                 "model_version": run.model_version, "status": _status_of(run),
                 "started_at": f(run.started_at), "finished_at": f(run.finished_at),
                 "n_projects": run.n_projects, "n_judges": run.n_judges,
-                "n_comparisons": run.n_comparisons, "config": run.config or {},
+                "n_comparisons": run.n_comparisons, "config": cfg,
+                "converged": cfg.get("converged", True),
+                "convergence_warning": cfg.get("convergence_warning"),
                 "error": run.error},
         "ranking": ranking, "judges": judges,
     }
+
 
 
 @router.get("/events/{event_id}/results")
@@ -201,7 +225,7 @@ async def latest_results(event_id: str, db: AsyncSession = Depends(get_db),
     judging is still in flight — the judging status endpoint is the
     progress view until then."""
     e = await managed_event(db, user, event_id)
-    run = await service.latest_succeeded_run(db, e.id)
+    run = await service.latest_succeeded_run(db, e.id, model_prefix="crowd-bt")
     if not run:
         err(404, "not_found", "No final ranking yet — calculate after the judging deadline")
     return await _run_payload(db, run)
@@ -214,7 +238,8 @@ async def list_runs(event_id: str, db: AsyncSession = Depends(get_db),
     makes recalculation auditable instead of destructive."""
     e = await managed_event(db, user, event_id)
     res = await db.execute(select(ModelRun).where(
-        ModelRun.event_id == e.id).order_by(ModelRun.started_at.desc()))
+        ModelRun.event_id == e.id,
+        ModelRun.model_version.like("crowd-bt%")).order_by(ModelRun.started_at.desc()))
     f = lambda x: x.isoformat() if x else None
     return {"runs": [{
         "id": r.id, "model_version": r.model_version, "status": _status_of(r),
@@ -264,7 +289,7 @@ async def export_csv(event_id: str = "", db: AsyncSession = Depends(get_db),
         U, U.id == TeamMember.user_id).where(TeamMember.role == TeamRole.CAPTAIN))
     captains = {tm.team_id: (name, email) for tm, name, email in res.all()}
 
-    run = await service.latest_succeeded_run(db, e.id)
+    run = await service.latest_succeeded_run(db, e.id, model_prefix="crowd-bt")
     finals = {}
     if run:
         res = await db.execute(select(ModelProjectResult).where(

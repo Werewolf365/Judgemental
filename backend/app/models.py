@@ -391,6 +391,12 @@ class ModelProjectResult(Base):
     project_id = Column(Text, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
     theta = Column(Float, nullable=False)
     rank = Column(Integer, nullable=False)
+    # Laplace uncertainty: std from BFGS inverse-Hessian diagonal. NULL for
+    # legacy runs predating migration 0013. Use to compute P(A>B) intervals.
+    theta_std = Column(Float, nullable=True)
+    # 'High' or 'Low': whether this project's rank is a confident verdict or
+    # a close call (P(A beats adjacent rank) < 90%). Defaults High for legacy.
+    confidence = Column(Text, nullable=False, default="High")
 
 class ModelJudgeResult(Base):
     __tablename__ = "model_judge_results"
@@ -415,6 +421,70 @@ class PairwiseObservation(Base):
     loser_project_id = Column(Text, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     weight = Column(Float, nullable=False, default=1.0, server_default="1")
     source_evaluation_ids = Column(JSON, nullable=False, default=list, server_default="[]")
+
+
+# ---------------------------------------------------------------------------
+# Hierarchical Bayesian scoring model (single-judge-per-project edge case).
+# Shares model_runs with Crowd-BT (distinguished by model_version), with its
+# own result tables below — the BT tables are never written by this model.
+# ---------------------------------------------------------------------------
+
+class BayesProjectResult(Base):
+    """Per-project posterior summary for one hier-bayes-score run.
+
+    score_mean/sd are the posterior of latent quality theta on the 0..10
+    display scale; score_lo/hi the 5th/95th percentiles ("likely range");
+    p_top_k the posterior probability of finishing inside the Top-K;
+    confidence is High/Medium/Low in plain language.
+    """
+    __tablename__ = "bayes_project_results"
+    model_run_id = Column(Text, ForeignKey("model_runs.id", ondelete="CASCADE"), primary_key=True)
+    project_id = Column(Text, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
+    score_mean = Column(Float, nullable=False)
+    score_sd = Column(Float, nullable=False)
+    score_lo = Column(Float, nullable=False)
+    score_hi = Column(Float, nullable=False)
+    rank = Column(Integer, nullable=False)
+    p_top_k = Column(Float, nullable=False)
+    confidence = Column(Text, nullable=False, default="Low")
+
+
+class BayesJudgeEffect(Base):
+    """Posterior judge severity/leniency b_j for one hier-bayes-score run.
+
+    Heavily shrunk toward 0 for judges with few evaluations (partial pooling);
+    n_evaluations records how much data backs each estimate.
+    """
+    __tablename__ = "bayes_judge_effects"
+    model_run_id = Column(Text, ForeignKey("model_runs.id", ondelete="CASCADE"), primary_key=True)
+    judge_user_id = Column(Text, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    b_mean = Column(Float, nullable=False)
+    b_sd = Column(Float, nullable=False)
+    n_evaluations = Column(Integer, nullable=False, default=0)
+
+
+class BayesRankOverride(Base):
+    """Organizer manual rank resolution on a hier-bayes-score run.
+
+    When the model flags a close call as uncertain, the organizer may
+    interchange two ranks instead of accepting the model order. Each swap
+    writes a FULL snapshot (one row per ranked project, manual_rank 1..P, a
+    strict total order even where the model tied), so the effective ranking
+    is always exactly the latest snapshot. Clearing all rows reverts to the
+    model ranking. Never edited in place across runs: a refit starts clean
+    (new run id, no rows) and the organizer re-applies judgment if needed.
+    """
+    __tablename__ = "bayes_rank_overrides"
+    __table_args__ = (UniqueConstraint("model_run_id", "manual_rank",
+                                       name="uq_bayes_override_run_rank"),)
+    id = Column(Text, primary_key=True, default=_uuid)
+    model_run_id = Column(Text, ForeignKey("model_runs.id", ondelete="CASCADE"),
+                          nullable=False, index=True)
+    project_id = Column(Text, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    manual_rank = Column(Integer, nullable=False)
+    reason = Column(Text, nullable=True)
+    created_by = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
 
 class Ballot(Base):
     """One voter's voice-vote allocation on one project.

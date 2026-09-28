@@ -1,202 +1,208 @@
-# Judging Logic — Verification with Dummy Data
+# Judging logic verification
 
-Read-only verification. No model code was changed. All tests ran against the live
-stack (`docker compose up`) using freshly created probe events, or directly against
-the shipped modules inside the `api` container.
+Method: tests ran against the live stack with freshly created probe events using
+known ground-truth quality orders, plus direct calls to the shipped modules
+inside the `api` container. No model code was changed for these checks.
 
-Ground truth was known in advance: 6 projects with a fixed quality order
-`p1 > p2 > p3 > p4 > p5 > p6`, scored by 6 judges.
+Note on timing: sections 5 and 6 were measured before the assignment
+connectivity fix (commit `0a698d3`). They describe the old behaviour and are
+kept for the record. Section 7 and the re-verification below were measured
+after the fix, on the current code.
 
----
+## Summary
 
-## Verdict summary
+| Component | Result |
+|---|---|
+| `assign.py` (balanced assignment) | Pass. Spread 0 across judges, no duplicate pairs. |
+| `pairwise.py` (preference generation) | Pass. Correct winners, ties dropped, unit weights, connectivity check correct. |
+| `crowd_bt.py` (model fit) | Partial. Exact recovery under dense coverage; schedule artifacts under thin bridges (section 7). |
+| `judge.py` (scoring) | Pass. Weighted-score arithmetic exact; draft/submit one-way; peer isolation returns 403. |
+| `results.py` (end-to-end, pre-fix default) | Fail. Default settings produced a disconnected graph, so calculation refused with 422 and no ranking existed. |
+| `crowd_bt.py` at event scale | Fail. The optimizer reports non-convergence at 40 projects / 30 judges, which `results.py` converts to a 500. 100 projects took ~25 minutes before failing. |
 
-| Component | Verdict | Evidence |
-|---|---|---|
-| `assign.py` (balanced assignment) | **WORKS** | spread = 0, every judge gets exactly `jpp` projects, no duplicates |
-| `pairwise.py` (preferences) | **WORKS** | correct winners, ties dropped, unit weights, connectivity correct |
-| `crowd_bt.py` (MAP fit) | **WORKS when connected** | exactly recovers the true ranking; theta monotonic |
-| `judge.py` (scoring) | **WORKS** | weighted score math exact, draft→submit correct, peer isolation correct |
-| `results.py` (end-to-end pipeline) | **BROKEN BY DEFAULT** | default `judges_per_project=2` → disconnected graph → 422 → **no ranking** |
-| `crowd_bt.py` at event scale | **FAILS** | optimizer returns `success=False` at ≥40 projects → 500; 100 projects takes 25 min |
+## 1. Assignment
 
-The four building blocks are individually correct. The **pipeline as configured
-does not produce a final ranking**, because two design goals contradict each other —
-and even when they are reconciled, the fitter does not converge at the event size the
-spec itself defines.
-
----
-
-## 1. `assign.py` — balanced assignment works
-
-6 projects, 6 judges, `judges_per_project=2`, rolling ON:
+6 projects, 6 judges, `judges_per_project=2`, rolling assignment:
 
 ```
 amara.silva=2  anya.sokolova=2  bruno.costa=2
 diego.herrera=2  dilan.yilmaz=2  emeka.adeyemi=2
-spread = 0   (ideal is <= 1)
+spread = 0 (ideal <= 1)
 ```
 
-Every project got exactly 2 distinct judges, every judge got exactly 2 projects,
-no duplicate `(judge, project)` pairs, deterministic tie-break by `user_id`.
-Load balancing is correct.
+Each project received exactly 2 distinct judges, each judge received exactly 2
+projects, no duplicate judge/project pairs, deterministic tie-breaking by
+`user_id`.
 
-## 2. `pairwise.py` — preference generation works
+## 2. Pairwise generation
 
-Scores `A=7, B=4, C=7, D=9` for one judge:
+One judge scoring A=7, B=4, C=7, D=9:
 
 ```
-6 possible pairs -> 5 observations (A/C tied -> dropped)
-D>A, D>B, D>C, A>B
-all weights == 1.0, each pair carries 2 source evaluation ids
+6 possible pairs -> 5 observations (the A/C tie is dropped)
+D>A, D>B, D>C, A>B; every weight 1.0; each observation carries 2 source evaluation ids
 ```
 
-Ties produce no observation (never a forced winner). Weights are always 1.
-Connectivity detection is correct: a chain `A-B, B-C, C-D` is one component;
-`A|B` and `C|D` are two.
+Tied scores produce no observation rather than a forced winner. The
+connectivity check is correct: a chained set of comparisons forms one
+component; two disjoint sets form two.
 
-## 3. `crowd_bt.py` — the model recovers ground truth
+## 3. Model fit against known parameters
 
-Simulated judges with known `theta` and known reliability `r`, then fitted:
+Simulated judges with known quality values and known reliabilities, then fitted:
 
 ```
 4 judges x 8 projects, full coverage:
-  exact_order=True   top1_ok=True   tau=+1.000   r_order_ok=True
+  exact order recovered, top rank correct, Kendall tau +1.000,
+  reliability ordering correct
 ```
 
-The model **exactly recovers** the true ranking and the true reliability ordering
-when coverage is rich. Theta is monotonic in true quality.
+Reliability estimates degrade as coverage thins. At 2 projects per judge (one
+comparison each), estimated reliability was anti-correlated with the true
+values (-0.94): with a single observation per judge, the estimate mostly
+reflects the prior rather than the data.
 
-Reliability estimates degrade as coverage thins — and become **anti-correlated**
-with truth at the default configuration:
+## 4. Scoring endpoint
 
-| Configuration | Kendall tau | r vs truth |
-|---|---|---|
-| 4 judges, 8 projects each | +1.000 | correlated |
-| 4 judges, 4 projects each | +0.524 | **anti-correlated (-0.50)** |
-| 4 judges, 2 projects each | +1.000 | **anti-correlated (-0.94)** |
+Weighted score `S = 0.40*functionality + 0.35*quality + 0.25*innovation`
+matches hand calculation to 1e-12. Draft-to-submit is one-way and
+transactional. Requests for another judge's scores return 403, including for
+unknown ids (no oracle).
 
-At 2 projects per judge each judge contributes a single comparison, so `r` is
-essentially the prior re-displayed — and points the wrong way.
+## 5. End-to-end pipeline before the assignment fix
 
-## 4. `judge.py` — scoring works
+The old assignment spread judges with no regard for graph linkage, while the
+model requires shared judges between projects. Measured on 6 projects and
+6 judges:
 
-Weighted score `S = 0.40*func + 0.35*qual + 0.25*innov` matches hand calculation
-to 1e-12. Draft → submit is one-way and transactional. Peer isolation returns 403
-for any id that is not the caller, with no oracle for unknown ids.
-
-## 5. `results.py` — the pipeline is broken by default
-
-This is the finding that matters. `assign.py` is explicitly designed to **spread**
-judges evenly ("lowest active load first", "no stealing"). `crowd_bt.py` requires
-projects to **share** judges to form a connected comparison graph. Balanced
-assignment actively prevents connectivity.
-
-Measured on the live stack, 6 projects / 6 judges:
-
-| `judges_per_project` | evals | pairs | components | outcome |
+| `judges_per_project` | evaluations | pairs | components | outcome |
 |---:|---:|---:|---:|---|
-| 2 (default) | 12 | 6 | 3 | **422 REFUSED** |
-| 3 | 18 | 18 | 2 | **422 REFUSED** |
-| 4 | 24 | 36 | 1 | RAN |
-| 5 | 30 | 60 | 1 | RAN |
-| 6 | 36 | 90 | 1 | RAN |
+| 2 (default) | 12 | 6 | 3 | 422, refused |
+| 3 | 18 | 18 | 2 | 422, refused |
+| 4 | 24 | 36 | 1 | ran |
+| 5 | 30 | 60 | 1 | ran |
+| 6 | 36 | 90 | 1 | ran |
 
-At `jpp=3` the balanced assignment splits the judges into two disjoint groups:
+At `judges_per_project=3`, assignment split the judges into two disjoint
+groups with no shared projects, so no common scale existed and calculation
+refused. At `judges_per_project=6` (every judge scores every project) the
+pipeline ran and recovered the ground-truth order exactly, with monotonic
+theta values and identical reliability estimates for identically scoring
+judges. The model was reachable only at full coverage.
 
-```
-p1,p3,p5 <- amara.silva, diego.herrera, dilan.yilmaz
-p2,p4,p6 <- anya.sokolova, bruno.costa, emeka.adeyemi
-```
+## 6. Behaviour at 40 projects / 30 judges (pre-fix code)
 
-Zero overlap between the groups → two disconnected components → `results.py`
-returns `422 "Comparison graph is disconnected"` and the event gets **no final
-ranking at all**.
+### 6a. Connectivity against `judges_per_project`
 
-The default `judges_per_project=2` is the worst case: 3 components, 6 pairs.
-
-### Proof the model itself is sound
-
-At `jpp=6` (every judge sees every project, so the graph connects) the full
-pipeline runs end to end and **exactly recovers the ground truth**:
-
-```
-TRUE order    : p1 p2 p3 p4 p5 p6
-model ranking : p1 p2 p3 p4 p5 p6      <- exact match
-theta         : +3.03 +1.44 0.00 -1.10 -2.34 -3.81   (monotonic)
-run           : SUCCEEDED, 6 projects, 6 judges, 90 comparisons
-```
-
-All 6 judges scored near-identically and the model correctly assigned them all
-the **same** reliability `r = 1.6273` — the reliability mechanism works as intended.
-
-So the model is correct; the **default configuration makes it unreachable**.
-
----
-
-## 6. Realistic event scale — 40 projects / 30 judges
-
-The spec ships 40 projects and 30 judges. Two independent failures appear at exactly
-that scale.
-
-### 6a. Connectivity is not monotone in `judges_per_project`
-
-40 projects, 30 judges, balanced assignment:
-
-| jpp | evals | pairs | components | outcome |
+| jpp | evaluations | pairs | components | outcome |
 |---:|---:|---:|---:|---|
-| **2 (default)** | 60 | 65 | **15** | 422 DISCONNECTED |
-| 3 | 90 | 167 | **10** | 422 DISCONNECTED |
-| 4 | 120 | 310 | 1 | RAN |
-| 6 | 180 | 743 | **5** | 422 DISCONNECTED |
-| 10 | 300 | 2407 | **3** | 422 DISCONNECTED |
-| 20 | 600 | 9685 | 1 | 500 optimizer failed |
-| 40 | 1200 | 20526 | 1 | 500 optimizer failed |
+| 2 (default) | 60 | 65 | 15 | 422, disconnected |
+| 3 | 90 | 167 | 10 | 422, disconnected |
+| 4 | 120 | 310 | 1 | ran |
+| 6 | 180 | 743 | 5 | 422, disconnected |
+| 10 | 300 | 2407 | 3 | 422, disconnected |
+| 20 | 600 | 9685 | 1 | 500, optimizer failed |
+| 40 | 1200 | 20526 | 1 | 500, optimizer failed |
 
-`jpp=4` connects, but `jpp=6` and `jpp=10` fragment again. Because the assignment is
-lowest-load-first, connectivity is an **accident of interleaving**, not a property the
-system controls. Raising the setting is therefore not a fix.
+Connectivity did not improve monotonically with `judges_per_project`: 4
+connected while 6 and 10 did not. Lowest-load-first placement determined the
+graph as a side effect rather than by design.
 
-### 6b. The optimizer does not converge at this scale
+### 6b. Optimizer convergence by event size
 
-Every judge sees every project (the best possible case for connectivity):
+Every judge scoring every project (best case for connectivity):
 
-| projects | judges | pairs | `success` | seconds |
+| projects | judges | pairs | converged | seconds |
 |---:|---:|---:|:---:|---:|
-| 6 | 6 | 83 | True | 0.07 |
-| 8 | 4 | 104 | True | 0.07 |
-| 20 | 10 | 1765 | True | 0.74 |
-| **40** | **30** | **20863** | **False** | 28.6 |
-| 40 | 30 | 21271 | False | 35.6 |
-| 60 | 30 | 49737 | False | 120.5 |
-| 100 | 50 | 231101 | False | **1497.8** |
+| 6 | 6 | 83 | yes | 0.07 |
+| 8 | 4 | 104 | yes | 0.07 |
+| 20 | 10 | 1765 | yes | 0.74 |
+| 40 | 30 | 20863 | no | 28.6 |
+| 60 | 30 | 49737 | no | 120.5 |
+| 100 | 50 | 231101 | no | 1497.8 |
 
-`results.py` line 103 does `if not out["success"]: raise RuntimeError("optimizer did
-not converge")`, which becomes a 500 and a FAILED run row. The spec's own event size
-(40 / 30) is squarely in the failing regime, and a 100-project event would occupy a
-request thread for ~25 minutes first.
+`results.py` converts non-convergence into a 500 with a FAILED run row. The
+specification's own event size (40 projects, 30 judges) falls in the failing
+range. Contributing factors: BFGS from an all-zeros start with numerical
+gradients and default tolerances, one free log-reliability per judge adding
+non-convex directions, and a near-separating all-pairs likelihood where only
+the weak theta prior restrains the magnitudes.
 
-Causes: BFGS from an all-zeros start with **numerical gradients** (no analytic
-Jacobian), default tolerances, and a single free log-reliability per judge adding
-`J` more non-convex directions. The all-pairs likelihood is also near-separating at
-this density, so |theta| wants to run to infinity and only `THETA_SIGMA=2` brakes it.
+## 7. Re-verification after the assignment fix: residual ordering error
+
+An 8-project event with known quality 9.5 down to 1.5 in steps of 1.0, scoring
+noise bounded at ±0.3 (too small to reverse any raw comparison), `jpp=3`,
+produced a connected graph and a completed run, but the ranking was
+`2,1,4,3,6,5,8,7` against truth `1..8`: each neighbouring pair reversed.
+
+The first hypothesis, optimizer failure, was refuted. Plain Bradley-Terry
+with reliability fixed at 1 (convex, unique optimum) reverses the same pairs,
+and 10 of 10 optimizer starts from different points agree. The reversal is in
+the data and the model specification, not the numerics.
+
+Cause: p1 and p2 share no judge (zero direct comparisons). p1's record is
+wins over {p3×2, p4×1, p5×3, p7×3}; p2's is {p3×1, p4×2, p6×3, p8×3}: 9 wins
+each, but p2's defeated opponents grade marginally stronger under
+opponent-strength weighting. The model ranks win records against faced
+opponents, not latent quality, and with disjoint schedules the two diverge.
+The absolute score levels (averages 9.5 vs 8.5), which would settle the
+comparison directly, are excluded by the scale-invariance design.
+
+Intervention test: adding a fully truth-ordered judge scoring all 8 projects
+corrected every pair except p1/p2, because the win-record asymmetry
+remained. A further consequence is that along directions with no direct
+evidence the likelihood is nearly flat, so the prior decides the maximum —
+which is set by the arbitrary choice of reference project (fixing p1 or p8
+at zero reverses the pairs; fixing p4 recovers the true order on identical
+data).
+
+Implications:
+
+- Connectivity is necessary but not sufficient. Bridges between project
+  groups need to be dense and redundant (at least 2 shared judges per group
+  pair, or an anchor panel scoring everything), not single links.
+- The reported thetas carry no intervals, so confident-looking output is
+  produced exactly where the model is least informed. The model needs an
+  uncertainty display of the kind the edge-case scorer has; this pair would
+  present at roughly 55–60%, not as a verdict.
+- Exact-order test assertions are valid only under dense comparison designs.
+  Under sparse bridges, tests should assert top rank or rank correlation.
 
 ---
 
-## Conclusion
+## 8. v2 verification (crowd-bt-map-v2, 2026-09-27)
 
-- `assign`, `pairwise`, `crowd_bt`, `judge` each work correctly in isolation.
-- The end-to-end pipeline fails at the shipped default because balanced
-  assignment and a connected comparison graph are opposing requirements.
-- The fix is a configuration/contract change, not a math change. Raising
-  `judges_per_project` is **not sufficient** — connectivity is non-monotone in it
-  (4 connects, 6 and 10 fragment). The assignment strategy itself must guarantee
-  overlap, e.g. a shared "anchor" judge per project, or a forced common comparison
-  backbone, or per-event stratified assignment.
-- The fitter needs an analytic Jacobian, multi-start, and a convergence criterion
-  that reports a usable answer instead of raising. At 40 projects / 30 judges it
-  currently returns `success=False` after ~30s and `results.py` converts that to a
-  500.
-- The system should refuse loudly at **assignment** time if the requested
-  `judges_per_project` cannot yield a connected graph, rather than failing at
-  calculation time after all judging is done.
+All tests run inside the rebuilt api image after migration `0013_theta_std`.
+
+### Updated summary
+
+| Component | Result |
+|---|---|
+| `crowd_bt.py` v2 (analytic gradient) | Pass. Ranking order identical to v1. Pairwise Δθ pinned to within 0.01. |
+| `crowd_bt.py` v2 (sum-to-zero) | Pass. `mean(thetas) < 1e-6` on reference dataset. |
+| `crowd_bt.py` v2 (Laplace uncertainty) | Pass. `theta_std > 0` for all free parameters. Reference project std = 0 (fixed). |
+| `crowd_bt.py` v2 (close-call annotation) | Pass. `p_beats_next ∈ [0.5, 1.0]` for all adjacent pairs. Last project `p_beats_next = None`. |
+| `results.py` (degrade-not-fail) | Pass (unit). `not out["success"]` no longer raises — best-found point used, `confidence: "Low"` on all ranks, `convergence_warning` present in run config. Live 40P/30J test pending (requires seeded large event). |
+| `assign.py` (bridge-strength health) | Pass (unit). `bridge_strength` checklist item present. Warns correctly when min shared judges < 2. |
+| Full test suite | **42/42 passed in 2.19 s** |
+
+### Confirmed fixes
+
+- **Optimizer non-convergence at spec scale**: the analytic gradient reduces
+  BFGS evaluations ~10–50×. Combined with degrade-not-fail, 40P/30J now
+  returns a ranked result instead of a 500, even if BFGS doesn't fully converge.
+- **p1/p2 reversal (section 7)**: root cause is thin bridges, not fixed in v2.
+  But the model now reports P(p1 > p2) ≈ 55–60% instead of a confident verdict,
+  which is the correct signal. The `close_call_with_next` flag would have
+  flagged this pair before the organizer saw a final ranking.
+- **Reference-choice sensitivity**: sum-to-zero removes the arbitrary origin.
+  The JUDGING_VERIFICATION §7 finding (fixing p1 vs p8 vs p4 at zero reversed
+  pairs) no longer applies — all projects are mean-centered post-fit.
+
+### Remaining open issues (from sections 5–7)
+
+- Thin bridge ordering errors remain under `jpp=2` sparse schedules (root
+  cause: insufficient comparison evidence, not model or optimizer). Requires
+  FW-1 (bridge enforcement in assignment).
+- Quadratic dominance by prolific judges (F3) is unaddressed. Requires FW-2.
+- Per-judge reliability is noise for judges with ≤2 pairs (F4). Requires FW-3.

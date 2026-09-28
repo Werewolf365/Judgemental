@@ -64,11 +64,18 @@ async def has_finalized_evaluation(db: AsyncSession, event_id: str) -> bool:
     return res.scalar_one_or_none() is not None
 
 
-async def latest_succeeded_run(db: AsyncSession, event_id: str):
-    res = await db.execute(select(ModelRun).where(
+async def latest_succeeded_run(db: AsyncSession, event: Event | str,
+                               model_prefix: str | None = None):
+    """Latest SUCCEEDED run for an event, optionally restricted to one model
+    family ("crowd-bt" / "hier-bayes-score"). Unfiltered (None) preserves the
+    old meaning: any succeeded run, used only for stage derivation."""
+    event_id = event.id if isinstance(event, Event) else event
+    stmt = select(ModelRun).where(
         ModelRun.event_id == event_id,
-        ModelRun.status == ModelRunStatus.SUCCEEDED
-    ).order_by(ModelRun.finished_at.desc()))
+        ModelRun.status == ModelRunStatus.SUCCEEDED)
+    if model_prefix:
+        stmt = stmt.where(ModelRun.model_version.like(f"{model_prefix}%"))
+    res = await db.execute(stmt.order_by(ModelRun.finished_at.desc()))
     return res.scalars().first()
 
 

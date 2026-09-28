@@ -43,17 +43,25 @@ submit into the event they are judging. The check is on the account's role, not
 on a per-event relationship, so no event lets a staff account slip through.
 
 Judging lives in `modules/judging/` with the same shape: `routes.py`
-(organizer/admin rubric, roster, config, results, CSV export),
-`judge.py` (judge-only scoring, peer-isolated by re-checking every id
-against the caller), `results.py` (calculate pipeline + run history),
+(organizer/admin rubric, roster, config, results, CSV export, manual
+single-judge assignment from the existing pool), `judge.py` (judge-only
+scoring, peer-isolated by re-checking every id against the caller),
+`results.py` (Crowd-BT calculate pipeline + run history, BT-only since the
+second model arrived), `bayes.py` (edge-case Bayesian scoring: calculate,
+Top-K uncertainty results, run history, rank interchange, override revert),
 and DB-free services — `service.py` (derived stage, weight resolution,
 rubric lock), `assign.py` (balanced assignment), `pairwise.py`
 (preference generation), `reliability.py` (cross-event priors),
-`crowd_bt.py` (MAP fit). No workers or queues exist (and none may be
-added per the local-first constraint): rolling assignment runs in-request
-after a successful submit and can never fail it; batch assignment and the
-final calculation are explicit organizer actions. Judge identity is
-`users.id` everywhere; the fixture `judges` table is legacy seed data.
+`crowd_bt.py` (MAP fit), `hier_score.py` (R = quality + severity + noise
+fit with partial pooling, posterior sampling, recommendations — numpy only,
+no optimizer). The judging-status endpoint reports `models:
+{bt_viable, bayes_ready}` so the console shows the Uncertainty tab exactly
+when Bradley–Terry cannot run and never next to a viable BT ranking. No
+workers or queues exist (and none may be added per the local-first
+constraint): rolling assignment runs in-request after a successful submit
+and can never fail it; batch assignment and both final calculations are
+explicit organizer actions. Judge identity is `users.id` everywhere; the
+fixture `judges` table is legacy seed data.
 
 `shared/audit.record()` writes the audit trail on its own short-lived session so
 a row survives a rolled-back or denied action, and it never raises: a broken

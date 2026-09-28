@@ -4,8 +4,9 @@ import { api, fmtDate } from "@/lib/api";
 import { I } from "@/components/art";
 import DateTimePicker from "@/components/DateTimePicker";
 import Popup from "@/components/Popup";
+import UncertaintyPanel from "@/components/UncertaintyPanel";
 
-type Tab = "rubric" | "judges" | "settings" | "results";
+type Tab = "rubric" | "judges" | "settings" | "results" | "uncertainty";
 
 /** Organizer judging console: rubric builder, judge roster with load,
  *  judging settings, and results. Rendered for the console's working event.
@@ -16,6 +17,7 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
   const [status, setStatus] = useState<any>(null);
   const [rubric, setRubric] = useState<any[]>([]);
   const [judges, setJudges] = useState<any[]>([]);
+  const [balance, setBalance] = useState<any>(null);
   const [results, setResults] = useState<any>(null);
   const [runs, setRuns] = useState<any[]>([]);
   const [msg, setMsg] = useState("");
@@ -45,7 +47,9 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
       setSPer(st.config.judges_per_project);
       setSRolling(st.config.rolling_judging);
       setRubric((await api(`/events/${eventId}/rubric`).catch(() => ({ criteria: [] }))).criteria || []);
-      setJudges((await api(`/events/${eventId}/judges`).catch(() => ({ judges: [] }))).judges || []);
+      const roster = await api(`/events/${eventId}/judges`).catch(() => ({ judges: [] }));
+      setJudges(roster.judges || []);
+      setBalance(roster.balance || null);
       const r = await api(`/events/${eventId}/results`).catch(() => null);
       setResults(r);
       setRuns((await api(`/events/${eventId}/results/runs`).catch(() => ({ runs: [] }))).runs || []);
@@ -177,6 +181,9 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
         <button className={tab === "judges" ? "on" : ""} onClick={() => setTab("judges")}>Judges ({judges.filter((j) => j.is_active).length})</button>
         <button className={tab === "settings" ? "on" : ""} onClick={() => setTab("settings")}>Settings</button>
         <button className={tab === "results" ? "on" : ""} onClick={() => setTab("results")}>Results</button>
+        {status && (!status.models?.bt_viable || status.models?.bayes_ready) && (
+          <button className={tab === "uncertainty" ? "on" : ""} onClick={() => setTab("uncertainty")}>Uncertainty</button>
+        )}
         <span className={`badge ${stage === "RESULTS_READY" ? "badge-ok" : stage === "OPEN" ? "badge-track" : "badge-muted"}`}
           style={{ marginLeft: "auto", alignSelf: "center" }}>{stage.replace("_", " ")}</span>
         <button className="btn-ghost btn-sm" style={{ alignSelf: "center" }} onClick={load}>Refresh</button>
@@ -252,12 +259,30 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
             <p className="form-note">Rolling assignment is OFF and auto-assign is disabled — new submissions wait for you to press “Run batch assignment”.</p>)}
           {status?.auto_assign?.enabled !== false && (
             <p className="form-note">Auto-assign sweeps in the background{autoCadence ? ` every ${autoCadence}` : ""}{autoLast ? ` — last sweep ${autoLast} (${autoCreated} new)` : " — first sweep pending"}. “Run batch assignment” does the same pass right now without touching that schedule.</p>)}
+          {balance?.checklist?.length > 0 && (
+            <div className="deadline-bar" style={{ margin: "10px 0 4px", display: "block" }} role="status" aria-label="Assignment balance">
+              <b>Assignment balance</b>
+              <span style={{ fontWeight: 400 }}>
+                {" "}· workload spread {balance.workload.spread} ·{" "}
+                {balance.connected ? "one connected graph" : `${balance.components} disconnected components`} ·{" "}
+                {balance.pairwise_capacity} potential pairwise comparisons
+              </span>
+              <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontWeight: 400 }}>
+                {(balance.checklist || []).map((c: any) => (
+                  <li key={c.key}>
+                    {c.level === "ok" ? "✓ " : c.level === "warn" ? "⚠ " : "ℹ "}{c.detail}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {judges.map((j: any) => (
             <div key={j.user_id} style={{ display: "flex", gap: 10, padding: "8px 0", borderTop: "1px solid var(--line)", alignItems: "center", flexWrap: "wrap" }}>
               <b>{j.display_name}</b><span style={{ color: "var(--muted)" }}>{j.email}</span>
               {!j.is_active && <span className="badge badge-muted">Removed</span>}
               <span style={{ marginLeft: "auto", fontSize: 13, color: "var(--muted)" }}>
                 load <b>{j.active_load}</b> · done <b>{j.completed}</b> · total <b>{j.total_assigned}</b>
+                {j.pairwise_capacity > 0 && <> · <b>{j.pairwise_capacity}</b> comparisons</>}
               </span>
               {j.is_active && <button className="link-btn" onClick={() => removeJudge(j)}>Remove</button>}
             </div>
@@ -333,6 +358,10 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
               <p>Close the judging deadline, then calculate. Every version is kept — recalculating never rewrites history.</p></div>
           )}
         </div>
+      )}
+
+      {tab === "uncertainty" && status && (!status.models?.bt_viable || status.models?.bayes_ready) && (
+        <UncertaintyPanel eventId={eventId} onChanged={load} />
       )}
     </div>
   );

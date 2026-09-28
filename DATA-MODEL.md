@@ -39,6 +39,13 @@ The fixture `judges`/`scores`/`judge_tracks` tables stay as seeded legacy):
 - judge_reliability_history(id, judge_user_id, event_id, model_run_id, posterior_mu, posterior_sigma NULL under MAP, r) — latest row per judge is the next competition's prior
 - pairwise_observations(id, model_run_id, judge_user_id, winner/loser project_id, weight CHECK = 1, source_evaluation_ids JSON)
 
+T2b Bayesian scoring edge case (migration `0011_bayes_score`; shares `model_runs`,
+distinguished by `model_version = hier-bayes-score-v1`):
+
+- bayes_project_results(model_run_id, project_id, score_mean/sd/lo/hi, rank, p_top_k, confidence High/Medium/Low)
+- bayes_judge_effects(model_run_id, judge_user_id, b_mean/sd, n_evaluations) — posterior severity/leniency, shrunk toward 0 when evidence is thin
+- bayes_rank_overrides(id, model_run_id, project_id, manual_rank 1..P, reason?, created_by?) — organizer rank swaps; full snapshot per run, unique (run, rank); empty means model order stands
+
 T3 voting (migration `0009_voting`):
 
 - events += voting_enabled bool default false, voting_close nullable UTC, voting_mode text default 'auth' (auth/email/open), comments_visibility text default 'public' (public/team)
