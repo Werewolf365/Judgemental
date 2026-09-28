@@ -73,6 +73,12 @@ export default function DateTimePicker({
 
   useEffect(() => {
     if (!open) return;
+    if (!parseLocal(value)) {
+      // Nothing selected: always open on today's month, never on whatever
+      // month the view was left at (e.g. after Clear).
+      const n = new Date();
+      setVy(n.getFullYear()); setVm(n.getMonth());
+    }
     if (defaultToday && !parseLocal(value)) {
       const n = new Date();
       const p = { y: n.getFullYear(), m: n.getMonth(), d: n.getDate(), hh, mm };
@@ -106,6 +112,11 @@ export default function DateTimePicker({
     const c = parseLocal(value);
     setSel(c);
     if (c) { setVy(c.y); setVm(c.m); setHh(c.hh); setMm(c.mm); }
+    else {
+      // Cleared: park the view on today so the next open starts sane.
+      const n = new Date();
+      setVy(n.getFullYear()); setVm(n.getMonth());
+    }
   }, [value]);
 
   function pickDay(d: number) {
@@ -123,7 +134,11 @@ export default function DateTimePicker({
     setVy(p.y); setVm(p.m); setSel(p);
     onChange(toLocal(p));
   }
-  function clear() { setSel(null); onChange(""); }
+  function clear() {
+    setSel(null); onChange("");
+    const n = new Date();
+    setVy(n.getFullYear()); setVm(n.getMonth());
+  }
 
   function stepMonth(dir: number) {
     let y = vy, m = vm + dir;
@@ -160,8 +175,17 @@ export default function DateTimePicker({
           style={{ position: "fixed", zIndex: 500, top: pos.top, left: pos.left, width: "min(320px, calc(100vw - 16px))", margin: 0, padding: 16 }}
           onClick={(e) => e.stopPropagation()}
         >
-          <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
-            <b>{MONTHS[vm]} {vy}</b>
+          <div style={{ display: "flex", alignItems: "center", marginBottom: 8, gap: 4 }}>
+            <select aria-label="Month" value={vm}
+              onChange={(e) => setVm(+e.target.value)}
+              style={{ font: "inherit", fontWeight: 800, fontSize: 15, padding: "4px 6px", borderRadius: 9, border: "1px solid var(--line)", background: "#fff", maxWidth: 118 }}>
+              {MONTHS.map((label, i) => <option key={label} value={i}>{label}</option>)}
+            </select>
+            <select aria-label="Year" value={vy}
+              onChange={(e) => setVy(+e.target.value)}
+              style={{ font: "inherit", fontWeight: 800, fontSize: 15, padding: "4px 6px", borderRadius: 9, border: "1px solid var(--line)", background: "#fff", maxWidth: 84 }}>
+              {Array.from({ length: 51 }, (_, i) => 2000 + i).map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
             <span style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
               <button type="button" className="btn-ghost btn-sm" onClick={() => stepMonth(-1)} aria-label="Previous month">‹</button>
               <button type="button" className="btn-ghost btn-sm" onClick={() => stepMonth(1)} aria-label="Next month">›</button>
@@ -188,24 +212,24 @@ export default function DateTimePicker({
               >{d}</button>
             ))}
           </div>
-          <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 12, flexWrap: "wrap", rowGap: 10 }}>
-            <label style={{ fontSize: 12.5, fontWeight: 700, color: "var(--muted)" }}>Time
-              <span style={{ display: "flex", gap: 4, marginTop: 2 }}>
-                <select aria-label="Hour" value={hh} onChange={(e) => pickTime(+e.target.value, mm)}
-                  style={{ font: "inherit", padding: "6px 8px", borderRadius: 9, border: "1px solid var(--line)", background: "#fff" }}>
-                  {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, "0")}</option>)}
-                </select>
-                <select aria-label="Minute" value={mm} onChange={(e) => pickTime(hh, +e.target.value)}
-                  style={{ font: "inherit", padding: "6px 8px", borderRadius: 9, border: "1px solid var(--line)", background: "#fff" }}>
-                  {[0, 15, 30, 45].map((m) => <option key={m} value={m}>{String(m).padStart(2, "0")}</option>)}
-                </select>
-              </span>
-            </label>
-            <span style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
+          <div style={{ marginTop: 12 }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--muted)" }}>Time</span>
+              <select aria-label="Hour" value={hh} onChange={(e) => pickTime(+e.target.value, mm)}
+                style={{ font: "inherit", padding: "6px 8px", borderRadius: 9, border: "1px solid var(--line)", background: "#fff" }}>
+                {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, "0")}</option>)}
+              </select>
+              <b style={{ color: "var(--muted)" }}>:</b>
+              <select aria-label="Minute" value={mm} onChange={(e) => pickTime(hh, +e.target.value)}
+                style={{ font: "inherit", padding: "6px 8px", borderRadius: 9, border: "1px solid var(--line)", background: "#fff" }}>
+                {[0, 15, 30, 45].map((m) => <option key={m} value={m}>{String(m).padStart(2, "0")}</option>)}
+              </select>
+            </div>
+            <div style={{ display: "flex", gap: 4, alignItems: "center", marginTop: 10 }}>
               <button type="button" className="link-btn" style={{ padding: "8px 6px" }} onClick={clear}>Clear</button>
               <button type="button" className="link-btn" style={{ padding: "8px 6px" }} onClick={today}>Today</button>
-              <button type="button" className="btn btn-sm" onClick={() => setOpen(false)}>Done</button>
-            </span>
+              <button type="button" className="btn btn-sm" style={{ marginLeft: "auto" }} onClick={() => setOpen(false)}>Done</button>
+            </div>
           </div>
         </div>,
         document.body

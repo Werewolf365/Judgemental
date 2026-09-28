@@ -300,6 +300,20 @@ function Console() {
   const stepN = STEPS.find((s) => s.key === step)!.n;
   const goStep = (key: StepKey) => { setMsg(""); setStep(key); };
   const slug = ev?.slug || sel;
+  // Green means "essentials filled", not "visited": each step earns it from
+  // real data, so an empty-but-visited step stays neutral.
+  const stepDone = (key: StepKey): boolean => {
+    if (!ev) return key === "details" && !!name.trim() && !!close;
+    switch (key) {
+      case "details": return !!ev.name && !!ev.submissions_close;
+      case "tracks": return (detail?.tracks?.length || 0) > 0;
+      case "prizes": return (detail?.prizes?.length || 0) > 0;
+      case "form": return formFields.length > 0;
+      case "gallery": return !!curVis;
+      case "publish": return ev.status === "PUBLISHED";
+      case "voting": return !!voting?.voting_enabled;
+    }
+  };
 
   return (
     <div>
@@ -329,7 +343,7 @@ function Console() {
         <div className="steps" aria-label="Setup progress">
           {STEPS.map((s) => (
             <button key={s.key} type="button" onClick={() => goStep(s.key)}
-              className={`step ${(s.key === "details" && !ev && name.trim() && close) || (ev && ev.status !== "PUBLISHED" && s.n < stepN) ? "done" : s.n === stepN ? "now" : ""}`}
+              className={`step ${stepDone(s.key) ? "done" : s.n === stepN ? "now" : ""}`}
               style={{ cursor: "pointer", textAlign: "left", font: "inherit" }}>
               <b>{s.label}</b>
               {s.key === "details" && ev ? ev.name : s.key === "tracks" && ev ? `${detail?.tracks?.length || 0} added` : s.key === "prizes" && ev ? `${detail?.prizes?.length || 0} added` : s.key === "form" && ev ? `${formFields.length} fields` : s.key === "gallery" && ev ? VIS_OPTIONS.find((o) => o.v === curVis)?.title : s.key === "publish" && ev ? ev.status : s.key === "voting" && voting ? (voting.voting_enabled ? `On · ${voting.voting_mode}` : "Off") : ""}
