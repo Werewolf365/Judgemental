@@ -62,7 +62,7 @@ export default function Transfer({ eventId, onClose }: { eventId: string; onClos
     <div className="popup-overlay" role="presentation"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="popup-panel card" role="dialog" aria-modal="true" aria-label="Import and export"
-        style={{ maxWidth: 560 }}>
+        style={{ maxWidth: 560, background: "#fff" }}>
         <div style={{ flex: "1 1 100%" }}>
           <h3 style={{ marginTop: 0 }}>Import / Export</h3>
           <p className="form-note" style={{ marginTop: 0 }}>
@@ -92,7 +92,7 @@ export default function Transfer({ eventId, onClose }: { eventId: string; onClos
           </div>
           <h4 style={{ marginBottom: 6, marginTop: 16 }}>Import CSV</h4>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-            <div style={{ flex: "1 1 220px" }}><label>Dataset</label>
+            <div style={{ flex: "1 1 220px" }}><label style={{ display: "block", marginBottom: 6 }}>Dataset</label>
               <select value={impDs} onChange={(e) => setImpDs(e.target.value)} style={{ marginBottom: 0 }}>
                 {IMPORTABLE.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
               </select></div>

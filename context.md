@@ -428,3 +428,8 @@ The platform revolves around the following core entities:
 - **Import CSV transparency**: the control is remote's `Transfer.tsx` "Choose CSV…" ghost button — now solid `.btn`. (No import UI existed locally, which is why the earlier hunt came up empty.)
 - **Verified post-merge**: frontend build clean; unit 78/78; `check_t1` ALL PASS; `run.py` verified T1 T2; `check_t4` ALL PASS; merged dashboard + console spot-checked in-browser.
 - **Rule for future work**: pull before committing when others are active on the branch; when a rebase conflicts, resolve toward keeping the newer architecture and porting the older improvements into it — never the reverse.
+
+### 51. Transfer Dialog Readability (done 2026-09-29)
+- **Import/Export dialog** (`Transfer.tsx`, `globals.css`): "Choose CSV…" ghost button → solid `.btn`; "Dataset" label was inline (zero gap to the dropdown outside `.field`) → block + margin so it sits above the select.
+- **Dialog opacity**: `.popup-panel` / `.reg-panel` relied on the frosted `.card` background (0.88 white), so page content ghosted through dialog text. Both now declare solid `#fff`, plus an inline `background:#fff` on the Transfer panel after browser sampling showed interiors compositing gray (229,235,235) instead of white even with the correct rule ordered correctly in the served bundle — inline wins regardless of cascade/cache behavior. User confirmed the dialog reads correctly.
+- **Rule for future work**: dialog panels must be opaque by construction (solid background on the panel itself, not inherited translucency) — readability of a modal is not the place for the glass aesthetic.
