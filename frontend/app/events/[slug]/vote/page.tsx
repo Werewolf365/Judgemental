@@ -155,7 +155,10 @@ export default function VotePage({ params }: { params: { slug: string } }) {
           )}
           {mode === "email" && (
             <div style={{ marginTop: 12 }}><label>Your email (one ballot set per address)</label>
-              <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.org" inputMode="email" /></div>
+              <input value={email} onChange={(e) => setEmail(e.target.value)}
+                onBlur={() => { if (email.includes("@") && JSON.stringify(alloc) === JSON.stringify(saved)) load(email); }}
+                placeholder="you@example.org" inputMode="email" />
+              <p className="form-note">The project order is shuffled per voter — entering your email locks your shuffled order in.</p></div>
           )}
           {mode === "auth" && !loggedIn && (
             <p><Link href="/login" className="btn btn-sm">Log in to vote</Link></p>

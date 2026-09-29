@@ -33,13 +33,30 @@ Drafts are staff-only across the whole voting surface, same as the gallery.
 1. **Math cap**: the quadratic budget makes floods expensive by construction.
 2. **One cell per (voter, project)** (unique constraint); re-votes update.
 3. **Rate limits**: in-memory token buckets (30 ballot/min, 20 comment/min
-   per IP-or-user, env-overridable); refusals are 429s and audited.
+   per IP-or-user, env-overridable); refusals are 429s, audited, and stored
+   as flags.
 4. **Duplicate signals**: IP+agent fingerprints surfaced as collision
-   counts for organizers — advisory, never auto-blocking.
-5. **Own-team block** for logged-in voters.
+   counts for organizers — advisory, never auto-blocking — and stored as
+   flags on detection.
+5. **Own-team block** for logged-in voters, stored as a flag on attempt.
+6. **Organizer blocks** (migration `0021_security`): user id, raw voter key
+   (covers account-less email ballots), or IP — enforced on ballot casts
+   and comment posts with audited refusals until revoked. Revocation is a
+   timestamp, never a delete.
 
 Single worker is assumed (stock uvicorn); each worker would carry its own
 bucket, erring generous rather than blocking legit traffic.
+
+## Security panel
+
+`/security` (organizers see their events, admins everything): an overview
+(open flags by kind, active blocks, refused writes), **Flags** (one row per
+event/kind/subject — repeats reopen instead of duplicating; dismiss, or
+jump straight to blocking the subject), **Blocks** (issue/lift, emails
+resolve to accounts at write time), and the **Audit log** (action + text
+filters; admins can scope to one event or go platform-wide). The admin
+console's audit tab and the voting step's audit search both moved here —
+one home for logs instead of three.
 
 ## Verification
 

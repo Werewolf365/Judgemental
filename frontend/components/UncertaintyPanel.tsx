@@ -127,7 +127,7 @@ export default function UncertaintyPanel({ eventId, onChanged }: { eventId: stri
   function AssignRow({ projectId, title }: { projectId: string; title: string }) {
     return (
       <span style={{ display: "inline-flex", gap: 6, alignItems: "center", marginLeft: 8 }}>
-        <span className="badge badge-muted">re-evaluate?</span>
+        <span className="badge badge-muted" style={{ whiteSpace: "nowrap" }}>re-evaluate?</span>
         <select aria-label={`Assign a judge to ${title}`} value={assignSel[projectId] || ""}
           onChange={(e) => setAssignSel({ ...assignSel, [projectId]: e.target.value })}
           style={{ maxWidth: 190, marginBottom: 0, padding: "5px 8px", fontSize: 13 }}>
@@ -146,15 +146,24 @@ export default function UncertaintyPanel({ eventId, onChanged }: { eventId: stri
 
   return (
     <div>
-      <p style={{ color: "var(--muted)" }}>
-        For events where each project has only one judge, the pairwise ranking cannot run.
-        This model adjusts for strict and generous judges and shows how certain each position is.
-        A Low-confidence position may change with more judging.
-      </p>
-      <p className="form-note" style={{ marginTop: -6 }}>
-        How to read a row: <b>score</b> is the project's estimated quality (0–10 scale); <b>likely</b> is
-        where the true quality probably sits; <b>Top {topK || "…"}</b> is the chance it belongs in the top {topK || "…"}.
-        High means safe to announce — anything else wants more judging on the close calls below.</p>
+      {btRank.length > 0 ? (
+        <p style={{ color: "var(--muted)" }}>
+          The pairwise (Crowd-BT) ranking on the Results tab is this event's official result.
+          This tab supplements it: how certain each position is, and where extra judging helps most.
+        </p>
+      ) : (
+        <p style={{ color: "var(--muted)" }}>
+          For events where each project has only one judge, the pairwise ranking cannot run.
+          This model adjusts for strict and generous judges and shows how certain each position is.
+          A Low-confidence position may change with more judging.
+        </p>
+      )}
+      {data && (
+        <p className="form-note" style={{ marginTop: -6 }}>
+          How to read a row: <b>score</b> is the project's estimated quality (0–10 scale); <b>likely</b> is
+          where the true quality probably sits; <b>Top {topK || "…"}</b> is the chance it belongs in the top {topK || "…"}.
+          High means safe to announce — anything else wants more judging on the close calls below.</p>
+      )}
       {!!warnModels.length && (
         <div className="deadline-bar" style={{ marginBottom: 12 }} role="alert">
           <span><b>⚠ Too uncertain to call</b> — half or more of the {warnModels.join(" + ")} positions

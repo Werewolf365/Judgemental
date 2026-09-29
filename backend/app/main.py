@@ -18,6 +18,7 @@ from app.modules.judging.bayes import router as bayes_router
 from app.modules.voting.routes import router as voting_router
 from app.modules.certs.routes import router as certs_router
 from app.modules.transfer.routes import router as transfer_router
+from app.modules.security.routes import router as security_router
 from app.modules.judging import scheduler as auto_assign
 from app.shared.apikeys import require_scope
 
@@ -61,6 +62,7 @@ app.include_router(bayes_router, **_SCOPED)
 app.include_router(voting_router, **_SCOPED)
 app.include_router(certs_router, **_SCOPED)
 app.include_router(transfer_router, **_SCOPED)
+app.include_router(security_router, **_SCOPED)
 
 @app.get("/projects")
 async def compat_gallery():

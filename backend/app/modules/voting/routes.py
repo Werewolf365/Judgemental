@@ -7,8 +7,16 @@ Organizer surface (ORGANIZER/ADMIN, event-scoped through managed_event):
                                   reader: action/search/limit filters)
 
 Voter surface (no login required unless the event's mode says so):
-  GET  /public/events/{slug}/ballot          box + my allocations + budget
-  POST /public/events/{slug}/ballot          set one cell (0 retracts)
+  GET  /public/events/{slug}/ballot          box + my allocations + budget.
+                                             Projects shuffle per voter key
+                                             (stable per voter, random across
+                                             voters) — and shuffle fresh on
+                                             every load before an identity is
+                                             known, so the order never
+                                             defaults to alphabetical.
+  POST /public/events/{slug}/ballot          set one cell (0 retracts).
+                                             Blocked writers get a 403; every
+                                             refusal writes a security flag.
   GET  /public/events/{slug}/votes/results   tally, only after close
   GET/POST /public/projects/{id}/comments    thread (visibility-gated)
   PATCH /comments/{id}                        staff hide/show (organizer)
@@ -16,7 +24,9 @@ Voter surface (no login required unless the event's mode says so):
 Anti-abuse lives on every write: quadratic budgets (hard math cap),
 one cell per (voter, project) via unique constraint, own-team block for
 logged-in voters, per-IP token-bucket rate limits with audited refusals,
-and fingerprint-collision turnout signals for organizers.
+and fingerprint-collision turnout signals for organizers. All detections
+persist as security_flags; organizers answer with security_blocks. See
+the Security panel (/security) and modules/security.
 """
 import random
 import hashlib
@@ -32,6 +42,8 @@ from app.models import (AuditLog, Ballot, Comment, Event, Project, ProjectStatus
 from app.modules.auth.dependencies import optional_user, require_roles
 from app.modules.events.access import managed_event, require_manageable
 from app.modules.events.routes import parse_dt
+from app.modules.security.routes import blocked as _blocked
+from app.modules.security.routes import flag as _flag
 from app.modules.voting import quadratic, ratelimit
 from app.modules.voting import service
 from app.modules.voting.schemas import BallotIn, CommentIn, VotingSettingsIn
@@ -70,12 +82,17 @@ async def _public_event(db: AsyncSession, slug: str) -> Event:
 
 
 async def _limited(request: Request, user, route: str, action: str,
-                 event_id: str) -> None:
+                 event_id: str, db) -> None:
     """Token-bucket gate. Refusals are audited (record never raises, so the
     429 below always fires) so organizers see attempts, not just successes."""
     key = user.id if user is not None else _ip(request)
     ok, retry = ratelimit.check(str(key), route)
     if not ok:
+        # Explicit stored flag alongside the audit row: the security panel
+        # lists these without anyone grepping the audit trail.
+        await _flag(db, event_id=event_id, kind="rate_limit",
+                    subject_type="user" if user is not None else "ip",
+                    subject=str(key), detail={"route": route})
         await record(user, action, target_type="event", target_id=event_id,
                      event_id=event_id, detail={"route": route},
                      request=request)
@@ -100,6 +117,11 @@ async def voting_settings(event_id: str, db: AsyncSession = Depends(get_db),
             Ballot.event_id == e.id, Ballot.fp_hash.is_not(None)).group_by(
             Ballot.fp_hash).having(func.count(func.distinct(Ballot.voter_key)) > 1))
     collisions = [{"fp": fp, "voters": n} for fp, n in res.all()]
+    # Backfill stored flags for collisions that predate the flag writer
+    # (or arrived while nobody watched): viewing the settings persists them.
+    for c in collisions:
+        await _flag(db, e.id, "shared_device", "fingerprint", c["fp"],
+                    {"voters": c["voters"]})
     return {"config": service.voting_config_out(e),
             "turnout": {"voters": n_voters, "ballots": n_ballots,
                         "fp_collisions": collisions}}
@@ -144,11 +166,15 @@ async def event_audit(event_id: str, action: str = Query("", max_length=80),
                      | AuditLog.target_id.ilike(like, escape="\\"))
     rows = (await db.execute(select(AuditLog).where(*where).order_by(
         AuditLog.created_at.desc(), AuditLog.id.desc()).limit(limit))).scalars().all()
+    distinct = (await db.execute(select(AuditLog.action).distinct().where(
+        AuditLog.event_id == e.id).order_by(
+        AuditLog.action))).scalars().all()
     return {"entries": [{
         "id": r.id, "created_at": r.created_at.isoformat() if r.created_at else None,
         "actor_email": r.actor_email, "action": r.action,
         "target_type": r.target_type, "target_id": r.target_id,
-        "detail": r.detail or {}, "ip": r.ip} for r in rows]}
+        "detail": r.detail or {}, "ip": r.ip} for r in rows],
+        "actions": list(distinct)}
 
 
 # ---- ballot box ----
@@ -158,6 +184,10 @@ def _box_projects(projects: list, voter_key: str | None) -> list:
     if voter_key:
         seed = int(hashlib.sha256(f"{voter_key}".encode()).hexdigest(), 16) % (2 ** 32)
         random.Random(seed).shuffle(items)  # stable per voter, random across voters
+    else:
+        # No identity yet (logged out, email not entered): still shuffle, just
+        # fresh every load — order must never default to alphabetical.
+        random.Random().shuffle(items)
     return items
 
 
@@ -202,12 +232,22 @@ async def cast_ballot(slug: str, body: BallotIn, request: Request,
     if not open_:
         err(403, "forbidden", reason or "voting is not open")
     key = service.voter_key_for(e, user, body.email, body.voter_id)
-    await _limited(request, user, "vote", "vote.rate_limited", e.id)
-    # Per-voter write serialization: budget pricing is check-then-act, so
-    # two concurrent casts from one voter could both pass and land over
-    # budget. The xact lock is held until commit and costs nothing when
-    # uncontended.
-    await db.execute(select(func.pg_advisory_xact_lock(func.hashtext(key))))
+    # Blocks first: a blocked writer gets one deterministic 403, and the
+    # enforcement itself is audited. Runs before the rate limiter and the
+    # advisory lock so neither burns budget on refused traffic.
+    blk = await _blocked(db, e.id, user_id=user.id if user else None,
+                         voter_key=key, ip=_ip(request))
+    if blk:
+        await record(user, "security.block_enforced", target_type="block",
+                     target_id=blk.id, event_id=e.id,
+                     detail={"target_type": blk.target_type}, request=request)
+        err(403, "forbidden",
+            "This account or address is blocked from voting on this event")
+    await _limited(request, user, "vote", "vote.rate_limited", e.id, db)
+    # Project + own-team checks run BEFORE the advisory lock below: the flag
+    # writer commits on refusal, and any commit releases an xact-scoped
+    # advisory lock early. These are pure reads, so ordering them first
+    # loses nothing and keeps the lock strictly around the priced write.
     p = await db.get(Project, body.project_id)
     if (not p or p.event_id != e.id
             or (p.status.value if hasattr(p.status, "value") else str(p.status)) != "SUBMITTED"
@@ -216,7 +256,14 @@ async def cast_ballot(slug: str, body: BallotIn, request: Request,
     if user is not None:
         mine_team = await service.voter_team_id(db, e.id, user.id)
         if mine_team is not None and mine_team == p.team_id:
+            await _flag(db, e.id, "own_team_vote", "voter", key,
+                        {"project": p.id, "team": mine_team})
             err(403, "forbidden", "you cannot vote for your own team's project")
+    # Per-voter write serialization: budget pricing is check-then-act, so
+    # two concurrent casts from one voter could both pass and land over
+    # budget. The xact lock is held until commit and costs nothing when
+    # uncontended.
+    await db.execute(select(func.pg_advisory_xact_lock(func.hashtext(key))))
     priced = await service.price_allocation(db, e.id, key, p.id, body.votes)
     res = await db.execute(select(Ballot).where(
         Ballot.event_id == e.id, Ballot.voter_key == key, Ballot.project_id == p.id))
@@ -234,6 +281,17 @@ async def cast_ballot(slug: str, body: BallotIn, request: Request,
         db.add(Ballot(event_id=e.id, project_id=p.id, voter_key=key,
                       votes=body.votes, fp_hash=fp))
     await db.commit()
+    # Shared-device signal, stored explicitly: another voter key already
+    # voting under this fingerprint means one device behind two ballots.
+    # Runs after the commit so the flag writer's own commit cannot disturb
+    # the priced write above.
+    if fp:
+        others = await db.execute(select(func.count(func.distinct(Ballot.voter_key))).where(
+            Ballot.event_id == e.id, Ballot.fp_hash == fp,
+            Ballot.voter_key != key))
+        if (others.scalar() or 0) > 0:
+            await _flag(db, e.id, "shared_device", "fingerprint", fp,
+                        {"voter": key, "project": p.id})
     await record(user, "vote.cast", target_type="project", target_id=p.id,
                  event_id=e.id,
                  detail={"votes": body.votes, "spent": priced["spent"],
@@ -354,6 +412,13 @@ async def post_comment(project_id: str, body: CommentIn, request: Request,
     e = await db.get(Event, p.event_id)
     if not e:
         err(404, "not_found", "Project not found")
+    blk = await _blocked(db, e.id, user_id=user.id, ip=_ip(request))
+    if blk:
+        await record(user, "security.block_enforced", target_type="block",
+                     target_id=blk.id, event_id=e.id,
+                     detail={"target_type": blk.target_type}, request=request)
+        err(403, "forbidden",
+            "This account or address is blocked from commenting on this event")
     service.require_live_or_staff(e, user)
     service.require_commentable(p, user)
     # Duplicate reposts (scripted spam or double-submits) are refused: same
@@ -365,6 +430,8 @@ async def post_comment(project_id: str, body: CommentIn, request: Request,
         Comment.body == text,
         Comment.created_at > utcnow() - _td(minutes=10)))
     if dup.scalar_one_or_none():
+        await _flag(db, p.event_id, "comment_flood", "user", user.id,
+                    {"project": p.id})
         await record(user, "comment.duplicate", target_type="project",
                      target_id=p.id, event_id=p.event_id, request=request)
         err(429, "rate_limited",
@@ -373,7 +440,7 @@ async def post_comment(project_id: str, body: CommentIn, request: Request,
     # the real event_id — otherwise organizers never see comment floods in
     # their event-scoped audit view. The 404s above are identical, so this
     # ordering leaks nothing new.
-    await _limited(request, user, "comment", "comment.rate_limited", p.event_id)
+    await _limited(request, user, "comment", "comment.rate_limited", p.event_id, db)
     import uuid as _uuid
     c = Comment(id=f"cmt_{_uuid.uuid4().hex[:8]}", event_id=p.event_id,
                 project_id=p.id, author_user_id=user.id, body=text[:2000])

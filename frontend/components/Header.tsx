@@ -41,6 +41,7 @@ export default function Header() {
             {me && !isJudge && link("/dashboard", isOrg ? "Overview" : "Dashboard")}
             {showTeams && link("/teams", "My teams")}
             {isOrg && link("/organizer", "Organize")}
+            {isOrg && link("/security", "Security")}
             {isJudge && link("/judge", "Judging")}
             {me?.role === "ADMIN" && link("/admin", "Admin")}
           </nav>
