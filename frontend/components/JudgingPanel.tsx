@@ -20,6 +20,8 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
   const [balance, setBalance] = useState<any>(null);
   const [results, setResults] = useState<any>(null);
   const [runs, setRuns] = useState<any[]>([]);
+  const [bayes, setBayes] = useState<any>(null);
+  const [model, setModel] = useState<"bt" | "bayes">("bt");
   const [msg, setMsg] = useState("");
   const [settingsSaved, setSettingsSaved] = useState("");
   // Final-score blend: whether crowd votes count and at what weight.
@@ -85,6 +87,14 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
       const r = await api(`/events/${eventId}/results`).catch(() => null);
       setResults(r);
       setRuns((await api(`/events/${eventId}/results/runs`).catch(() => ({ runs: [] }))).runs || []);
+      const by = await api(`/events/${eventId}/bayes/results`).catch(() => null);
+      setBayes(by);
+      // Default to whichever model ran most recently; the badge below says
+      // which one is on screen so BT is never assumed silently.
+      const btT = r?.run?.finished_at || "";
+      const byT = by?.run?.finished_at || "";
+      if (by && (!r || byT > btT)) setModel("bayes");
+      else if (r) setModel("bt");
     } catch (e: any) { setMsg(e.message); }
   }
   useEffect(() => { if (eventId) load(); }, [eventId]);
@@ -193,6 +203,39 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
     finally { setBusy(false); }
   }
 
+  async function calculateBayes() {
+    if (!confirm("Run the hierarchical Bayes scoring? Use this when each project has few judges. Recalculating creates a new version — history is kept.")) return;
+    setMsg(""); setBusy(true);
+    try {
+      const d = await api(`/events/${eventId}/bayes/calculate`, { method: "POST", body: "{}" });
+      setNotice({ title: "Bayes scores calculated",
+        body: <>{d.projects} projects scored from {d.observations} evaluation(s). See the Uncertainty tab for ranges and close calls.</> });
+      await load();
+    } catch (e: any) { setMsg(e.message); }
+    finally { setBusy(false); }
+  }
+
+  /** Top-10-first ranking list in a compact scroll box instead of a
+   *  page-stealing full list. `key` should include the event + model so the
+   *  expanded state resets when switching. */
+  function TopTen({ items, renderRow }: { items: any[]; renderRow: (r: any) => React.ReactNode }) {
+    const [all, setAll] = useState(false);
+    return (
+      <div>
+        <div style={{ maxHeight: 340, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 12, padding: "0 12px" }}>
+          {items.slice(0, all ? items.length : 10).map((r: any) => (
+            <div key={r.project_id}>{renderRow(r)}</div>
+          ))}
+        </div>
+        {items.length > 10 && (
+          <div style={{ marginTop: 8 }}>
+            <button className="btn-ghost btn-sm" onClick={() => setAll(!all)}>
+              {all ? "Show top 10 only" : `Show all ${items.length}`}</button>
+          </div>
+        )}
+      </div>
+    );
+  }
   const stage = status?.stage || "—";
   const locked = !!status?.rubric_locked;
   const weights = rubric.filter((c) => c.is_active);
@@ -226,7 +269,7 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
         <button className={tab === "judges" ? "on" : ""} onClick={() => setTab("judges")}>Judges ({judges.filter((j) => j.is_active).length})</button>
         <button className={tab === "settings" ? "on" : ""} onClick={() => setTab("settings")}>Settings</button>
         <button className={tab === "results" ? "on" : ""} onClick={() => setTab("results")}>Results</button>
-        {status && (!status.models?.bt_viable || status.models?.bayes_ready) && (
+        {status && (!status.models?.bt_viable || status.models?.bayes_ready || results || bayes) && (
           <button className={tab === "uncertainty" ? "on" : ""} onClick={() => setTab("uncertainty")}>Uncertainty</button>
         )}
         <span className={`badge ${stage === "RESULTS_READY" ? "badge-ok" : stage === "OPEN" ? "badge-track" : "badge-muted"}`}
@@ -405,25 +448,38 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
               {status.counts.evaluations_submitted} submitted evaluation(s) · {status.counts.assignments} assignment(s)</span>}</p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
             <button className="btn" disabled={busy || stage === "OPEN" || stage === "NOT_STARTED"} onClick={calculate}
-              title={stage === "OPEN" || stage === "NOT_STARTED" ? "Available once the judging deadline passes" : "Run the Crowd-BT ranking"}>
-              Calculate final ranking <I.arrow /></button>
+              title={stage === "OPEN" || stage === "NOT_STARTED" ? "Available once the judging deadline passes" : "Run the Crowd-BT pairwise ranking"}>
+              Calculate BT ranking <I.arrow /></button>
+            <button className="btn-ghost" disabled={busy || stage === "OPEN" || stage === "NOT_STARTED"} onClick={calculateBayes}
+              title={stage === "OPEN" || stage === "NOT_STARTED" ? "Available once the judging deadline passes" : "Run the hierarchical Bayes scorer"}>
+              Calculate Bayes scores</button>
             <a className="btn-ghost" href={`/api/export.csv?event_id=${eventId}`} download
               title="One row per evaluation at any stage: project, team + leader, judge, every criterion score with weight and normalized share, totals, and ranks once calculated">
               Export CSV</a>
             {(stage === "OPEN" || stage === "NOT_STARTED") && (
               <span className="form-note" style={{ alignSelf: "center" }}>Set a judging deadline under Settings — calculation unlocks after it passes. The CSV works at every stage.</span>)}
           </div>
-          {results ? (
-            <div>
-              <h2>Final ranking <span style={{ fontWeight: 400, fontSize: 13, color: "var(--muted)" }}>
-                run {results.run.id} · {results.run.n_comparisons} comparisons · {fmtDate(results.run.finished_at)}</span></h2>
-              {results.ranking.map((r: any) => (
-                <div key={r.project_id} style={{ display: "flex", gap: 10, padding: "8px 0", borderTop: "1px solid var(--line)", alignItems: "center" }}>
+          {(results || bayes) && (
+            <p className="form-note" style={{ marginBottom: 10 }}>
+              Showing: <b>{model === "bt" ? "Crowd-BT pairwise ranking" : "Hierarchical Bayes scoring"}</b>
+              {model === "bt" && results && <> · run {results.run.id} · {results.run.n_comparisons} comparisons · {fmtDate(results.run.finished_at)}</>}
+              {model === "bayes" && bayes && <> · run {bayes.run.id} · {fmtDate(bayes.run.finished_at)}</>}
+              {results && bayes && (
+                <> · <button className="link-btn" onClick={() => setModel(model === "bt" ? "bayes" : "bt")}>
+                  Switch to {model === "bt" ? "Bayes scores" : "BT ranking"}</button></>
+              )}
+            </p>
+          )}
+          {model === "bt" && results ? (
+            <div key={`bt-${eventId}`}>
+              <h2>Final ranking</h2>
+              <TopTen items={results.ranking} renderRow={(r: any) => (
+                <div style={{ display: "flex", gap: 10, padding: "8px 0", borderTop: "1px solid var(--line)", alignItems: "center" }}>
                   <span className="badge badge-track">#{r.rank}</span>
                   <b>{r.title}</b><span style={{ color: "var(--muted)" }}>{r.team} · {r.track}</span>
                   <span className="mono" style={{ marginLeft: "auto" }}>θ {Number(r.theta).toFixed(3)}</span>
                 </div>
-              ))}
+              )} />
               <h2 style={{ marginTop: 16 }}>Judge reliability</h2>
               {results.judges.map((j: any) => (
                 <div key={j.user_id} style={{ display: "flex", gap: 10, padding: "6px 0", borderTop: "1px solid var(--line)", fontSize: 14 }}>
@@ -442,14 +498,27 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
                   ))}</div>
               )}
             </div>
+          ) : model === "bayes" && bayes ? (
+            <div key={`bayes-${eventId}`}>
+              <h2>Top {bayes.top_k}</h2>
+              <TopTen items={bayes.effective?.length ? bayes.effective : bayes.ranking} renderRow={(r: any) => (
+                <div style={{ display: "flex", gap: 10, padding: "8px 0", borderTop: "1px solid var(--line)", alignItems: "center", flexWrap: "wrap" }}>
+                  <span className="badge badge-track">#{r.effective_rank ?? r.rank}</span>
+                  {r.rank_source === "manual" && <span className="badge badge-muted">manual</span>}
+                  <b>{r.title}</b><span style={{ color: "var(--muted)" }}>{r.team} · {r.track}</span>
+                  <span className="mono" style={{ marginLeft: "auto" }}>score {Number(r.score).toFixed(2)}</span>
+                </div>
+              )} />
+              <p className="form-note">Ranges, Top-K chances and close calls live under the Uncertainty tab.</p>
+            </div>
           ) : (
             <div className="empty"><h3>No ranking yet</h3>
-              <p>Close the judging deadline, then calculate. Every version is kept — recalculating never rewrites history.</p></div>
+              <p>Close the judging deadline, then calculate with either model. Every version is kept — recalculating never rewrites history.</p></div>
           )}
         </div>
       )}
 
-      {tab === "uncertainty" && status && (!status.models?.bt_viable || status.models?.bayes_ready) && (
+      {tab === "uncertainty" && status && (!status.models?.bt_viable || status.models?.bayes_ready || results || bayes) && (
         <UncertaintyPanel eventId={eventId} onChanged={load} />
       )}
     </div>

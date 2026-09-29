@@ -19,8 +19,8 @@ import subprocess
 import sys
 
 EVENT_PATTERNS = ("scope-probe-tmp", "t2-probe-%", "t2-hist-%",
-                  "t2-repair-%", "t3-probe-%", "noj")
-USER_PATTERNS = ("t2probe%@local.test", "t3u2-%@local.test",
+                  "t2-repair-%", "t3-probe-%", "t4-probe%", "noj")
+USER_PATTERNS = ("t2probe%@local.test", "t3u2-%@local.test", "t4u%@local.test",
                  "t2repj%@local.test", "t2@local.test", "t3@local.test",
                  "probe@local.test", "sybil%@local.test")
 
