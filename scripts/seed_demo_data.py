@@ -288,8 +288,11 @@ EV = event_id("demo-vote")
 if EV:
     s, b = J(f"/public/events/{EV}/votes/results", None)
     rnk = [r.get("title", r.get("project_id")) for r in b.get("ranking", [])]
-    if s == 200 and rnk == ["Vote P1", "Vote P2", "Vote P3",
-                            "Vote P5", "Vote P4"]:
+    n_sub = len(submitted_projects(EV))
+    if n_sub >= 50 and len(rnk) == n_sub:
+        check("demo-vote: scale tally covers all projects (skipped)", True)
+    elif s == 200 and rnk == ["Vote P1", "Vote P2", "Vote P3",
+                              "Vote P5", "Vote P4"]:
         check("demo-vote: tally P1>P2>P3>P5>P4 (skipped)", True)
     else:
         _, tb = J(f"/events/{EV}/tracks", O)

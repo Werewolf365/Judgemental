@@ -27,6 +27,23 @@ Stop: `docker compose down`. Clean reset: `docker compose down -v`.
 - participant@local.test (PARTICIPANT)
 - 30 fixture judges (role JUDGE), 91 fixture participants
 
+## Scale demos (700 projects, 50 judges, 4000 voters)
+
+`python scripts/seed_scale.py` (runs inside the api container — see its
+header) rebuilds the three demos at real-event volume: tailored CSVs in
+`scripts/demo_csv/scale/` imported through the real endpoint, then bulk
+evidence and real calculations. Deterministic (seeded): leaders separate,
+mid-field is honest mush.
+
+- `demo-bt` — 700 projects × 3 evaluations from 50 judges, Crowd-BT ranked.
+- `demo-bayes` — 700 projects × 1 evaluation, hier-Bayes scored.
+- `demo-vote` — 50 projects, 4000 skewed voters, blended judge/crowd ranking.
+
+Scale truth: a 700-way total order cannot be confident — adjacent gaps are
+dust. The top group leads decisively (θ ≈ 2.4–3.0 vs ≈ 0 mid-field) while
+internal order flags close calls. That is the uncertainty tab working, not
+failing.
+
 ## Dedicated demo events (manual testing)
 
 `python scripts/seed_demos.py` (rerun-safe) ensures three stable events with

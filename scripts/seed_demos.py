@@ -22,6 +22,13 @@ BASE = "http://localhost:8000"
 O = "Cookie: session=org_7f2a_local_test_token"
 
 FUTURE = "2030-06-01T00:00:00Z"
+# A full, believable timeline so event pages never show "— → —".
+DATES = {"registration_start": "2026-01-10T09:00:00Z",
+         "registration_close": "2026-02-28T18:00:00Z",
+         "event_start": "2026-03-05T09:00:00Z",
+         "event_end": "2026-03-07T18:00:00Z",
+         "submissions_open": "2026-02-01T09:00:00Z",
+         "submissions_close": FUTURE}
 JUDGE_A = "tomas.varga@example.org"
 JUDGE_B = "wei.lindqvist@example.org"
 
@@ -60,8 +67,7 @@ def check(name, cond, detail=""):
 
 def ensure_event(slug, name, description):
     s, b = J("/events", O, "POST", {"name": name, "slug": slug,
-                                    "description": description,
-                                    "submissions_close": FUTURE})
+                                    "description": description, **DATES})
     if s == 200:
         return b["event"]["id"], True
     if s == 409:  # already there — reuse
@@ -128,11 +134,10 @@ DEMOS = [
     {"slug": "demo-bt", "name": "BT Model Demo",
      "description": "Stable fixture for hand-testing Crowd-BT ranking: "
                     "weighted rubric, two judges, batch assignment. "
-                    "Add teams + projects in the UI, then score and calculate.",
-     "tracks": ["Machine Learning", "Web Platform"],
+                    "Add teams + projects in the UI, then score and calculate.",     "tracks": ["ML Systems", "Web Platform", "Mobile", "Data Infra"],
      "prizes": [("Best Overall", "Top of the BT ranking", "$500 cash", None),
                 ("Best ML Hack", "Best project on the ML track", "$250 cash",
-                 "Machine Learning")],
+                 "ML Systems")],
      "rubric": [("Craft", 60), ("Scope", 40)],
      "judging": {"judges_per_project": 2, "rolling_judging": False},
      "judges": [JUDGE_A, JUDGE_B],
@@ -142,8 +147,7 @@ DEMOS = [
                     "open ballot, public comments. Add teams + projects, "
                     "then vote from an incognito window.",
      "tracks": ["Open Innovation", "Design"],
-     "prizes": [("Crowd Favorite", "Most community influence", "Glory", None)],
-     "rubric": [],
+     "prizes": [("Crowd Favorite", "Most community influence", "Glory", None)],     "rubric": [],
      "judging": None,
      "judges": [],
      "voting": {"voting_enabled": True, "voting_mode": "open",
@@ -167,8 +171,7 @@ for d in DEMOS:
         continue
     # Refresh metadata every run so the demos never drift stale.
     J(f"/events/{ev}", O, "PATCH",
-      {"name": d["name"], "description": d["description"],
-       "submissions_close": FUTURE})
+      {"name": d["name"], "description": d["description"], **DATES})
     tracks = ensure_tracks(ev, d["tracks"])
     check(f"{d['slug']}: tracks filled ({len(d['tracks'])})",
           all(n in tracks for n in d["tracks"]), f"{sorted(tracks)}")
