@@ -40,24 +40,19 @@ def _clean_detail(detail: dict | None) -> dict:
 
 
 def _client_ip(request):
-    """Best-effort client address.
+    """Best-effort client address via shared/client_ip (proxy-aware).
 
-    Behind the bundled nginx gateway `request.client.host` is the proxy's own
-    address, so X-Forwarded-For is used — specifically the RIGHT-most entry,
-    which is the address nginx itself saw (it appends the real client). The
-    left-most entry is attacker-controlled whenever anything reaches the API
-    directly, so it must never be trusted. Treat this as attribution, never
-    as authentication.
+    Behind the bundled nginx gateway `request.client.host` is the proxy's
+    own address, so the forwarded chain is used — but only from a trusted
+    peer, since a direct client can forge the whole header. Attribution,
+    never authentication.
     """
     if request is None:
         return None
+    from app.shared.client_ip import client_ip
     forwarded = request.headers.get("x-forwarded-for") if hasattr(request, "headers") else None
-    if forwarded:
-        parts = [p.strip() for p in forwarded.split(",") if p.strip()]
-        if parts:
-            return _clean(parts[-1], 64)
     client = getattr(request, "client", None)
-    return _clean(client.host if client else None, 64)
+    return _clean(client_ip(forwarded, client.host if client else None), 64)
 
 
 async def record(actor, action: str, *, target_type: str | None = None, target_id=None,

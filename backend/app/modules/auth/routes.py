@@ -41,17 +41,13 @@ def _cookie(resp: Response, raw: str):
                     secure=secure, path="/", max_age=SESSION_DAYS * 86400)
 
 def _ip(request: Request | None) -> str:
-    """Right-most X-Forwarded-For (what the bundled nginx saw) else direct
-    peer — same rule as voting/routes._ip. Attribution only."""
-    if request is not None:
-        fwd = request.headers.get("x-forwarded-for")
-        if fwd:
-            parts = [p.strip() for p in fwd.split(",") if p.strip()]
-            if parts:
-                return parts[-1]
-        if request.client:
-            return request.client.host
-    return "unknown"
+    """Right-most X-Forwarded-For from a trusted peer, else the direct peer
+    (shared/client_ip) — same rule as voting/routes._ip. Attribution only."""
+    from app.shared.client_ip import client_ip
+    if request is None:
+        return "unknown"
+    peer = request.client.host if request.client else None
+    return client_ip(request.headers.get("x-forwarded-for"), peer)
 
 
 async def _limited(request: Request, route: str, action: str) -> None:

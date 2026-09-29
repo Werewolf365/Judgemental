@@ -34,8 +34,30 @@ const VIS_OPTIONS = [
   { v: "ORGANIZERS_ONLY", title: "Organizers only", desc: "Hidden from everyone except organizers and admins." },
 ];
 
-function Console() {
-  const [me, setMe] = useState<any>(null);
+/** Top-10-first list in a compact scroll box (long review lists). */
+function TopList({ items, idKey, renderRow }: {
+  items: any[]; idKey: (r: any) => string; renderRow: (r: any) => React.ReactNode;
+}) {
+  const [all, setAll] = useState(false);
+  if (!items.length) return null;
+  return (
+    <div>
+      <div style={{ maxHeight: 340, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 12, padding: "0 12px" }}>
+        {(all ? items : items.slice(0, 10)).map((r: any) => (
+          <div key={idKey(r)}>{renderRow(r)}</div>
+        ))}
+      </div>
+      {items.length > 10 && (
+        <div style={{ marginTop: 8 }}>
+          <button className="btn-ghost btn-sm" onClick={() => setAll(!all)}>
+            {all ? "Show top 10 only" : `Show all ${items.length}`}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Console() {  const [me, setMe] = useState<any>(null);
   const [events, setEvents] = useState<any[]>([]);
   const [sel, setSel] = useState<string>("");
   const [detail, setDetail] = useState<any>(null);
@@ -78,7 +100,12 @@ function Console() {
   const startNew = search.get("new") === "1";
 
   async function loadDetail(id: string) {
-    try { setDetail(await api(`/public/events/${id}`)); }
+    let eid = id;
+    try {
+      const pub = await api(`/public/events/${id}`);
+      setDetail(pub);
+      eid = pub.event?.id || id;
+    }
     catch {
       try {
         const d = await api(`/events/${id}`);
@@ -87,8 +114,20 @@ function Console() {
           api(`/events/${d.event.id}/prizes`).catch(() => ({ prizes: [] })),
         ]);
         setDetail({ event: d.event, tracks: t.tracks || [], prizes: p.prizes || [] });
+        eid = d.event.id;
       } catch { setDetail(null); setFormFields([]); setVoting(null); return; }
     }
+    // The public payload omits track is_active — merge the organizer list
+    // (which carries it) so the on/off toggle reads true state.
+    try {
+      const t = await api(`/events/${eid}/tracks`);
+      const byId: Record<string, boolean> = Object.fromEntries(
+        (t.tracks || []).map((x: any) => [x.id, !!x.is_active]));
+      setDetail((d: any) => d ? {
+        ...d, tracks: (d.tracks || []).map((x: any) => ({
+          ...x, is_active: byId[x.id] ?? true })),
+      } : d);
+    } catch { /* public fallback stands */ }
     try {
       const ff = await api(`/events/${id}/form-fields`);
       setFormFields(ff.fields || []);
@@ -236,16 +275,22 @@ function Console() {
     catch (e: any) { setMsg(e.message); }
   }
   async function removeTrack(id: string, name: string) {
-    if (!confirm(`Remove track “${name}”? Tracks with projects are kept but deactivated instead of deleted.`)) return;
+    if (!confirm(`Remove track “${name}”? Tracks with projects are kept but switched off instead of deleted.`)) return;
     try {
       const d = await api(`/tracks/${id}`, { method: "DELETE" });
-      setMsg(d.deactivated ? `“${name}” has projects, so it was deactivated instead of deleted.` : `Track “${name}” removed.`);
+      setMsg(d.deactivated ? `“${name}” has projects, so it stays but switched off.` : `Track “${name}” removed.`);
       await loadDetail(detail.event.id);
     } catch (e: any) { setMsg(e.message); }
   }
-  async function reactivateTrack(id: string, name: string) {
-    try { await api(`/tracks/${id}`, { method: "PATCH", body: JSON.stringify({ is_active: true }) }); await loadDetail(detail.event.id); setMsg(`Track “${name}” is back on. New submissions can use it again.`); }
-    catch (e: any) { setMsg(e.message); }
+  async function toggleTrack(t: any) {
+    const next = !t.is_active;
+    // Optimistic flip so the switch feels instant; reload confirms.
+    setDetail((d: any) => d ? { ...d, tracks: (d.tracks || []).map((x: any) =>
+      x.id === t.id ? { ...x, is_active: next } : x) } : d);
+    try {
+      await api(`/tracks/${t.id}`, { method: "PATCH", body: JSON.stringify({ is_active: next }) });
+      await loadDetail(detail.event.id);
+    } catch (e: any) { setMsg(e.message); await loadDetail(detail.event.id); }
   }
   async function addPrize() {
     if (!prize.name.trim() || !detail) return;
@@ -445,13 +490,18 @@ function Console() {
                     <button className="btn-ghost btn-sm" onClick={() => setEditingTrackId("")}>Cancel</button>
                   </span>
                 ) : (
-                  <span key={t.id} className="badge badge-track" style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+                  <span key={t.id} className="badge badge-track" style={{ display: "inline-flex", gap: 8, alignItems: "center", opacity: t.is_active ? 1 : .65 }}>
                     {t.name}
-                    {!t.is_active && <em style={{ fontStyle: "normal", opacity: .7 }}>(off)</em>}
+                    <button type="button" role="switch" aria-checked={!!t.is_active} title={t.is_active ? "Switch off" : "Switch on"}
+                      aria-label={`Switch track ${t.name} ${t.is_active ? "off" : "on"}`}
+                      onClick={() => toggleTrack(t)}
+                      style={{ width: 34, height: 19, borderRadius: 12, border: "1px solid var(--line)", cursor: "pointer",
+                        background: t.is_active ? "var(--aqua)" : "rgba(0,0,0,.12)", position: "relative", padding: 0 }}>
+                      <span style={{ position: "absolute", top: 2, left: t.is_active ? 17 : 2, width: 13, height: 13,
+                        borderRadius: "50%", background: "#fff", transition: "left .15s ease" }} />
+                    </button>
                     <button type="button" className="link-btn" style={{ fontSize: 12 }} onClick={() => { setEditingTrackId(t.id); setEditTrackName(t.name); }}>Edit</button>
-                    {!t.is_active
-                      ? <button type="button" className="link-btn" style={{ fontSize: 12 }} onClick={() => reactivateTrack(t.id, t.name)}>Reactivate</button>
-                      : <button type="button" className="link-btn" style={{ fontSize: 12 }} onClick={() => removeTrack(t.id, t.name)}>Remove</button>}
+                    <button type="button" className="link-btn" style={{ fontSize: 12 }} onClick={() => removeTrack(t.id, t.name)}>Remove</button>
                   </span>
                 )
               ))}
@@ -689,8 +739,8 @@ function Console() {
                 <option value="SUBMITTED">Submitted</option>
               </select>
               {!subs.length && <p style={{ color: "var(--muted)" }}>No submissions match this filter.</p>}
-              {subs.map((s: any) => (
-                <div key={s.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "10px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>
+              <TopList items={subs} idKey={(s: any) => s.id} renderRow={(s: any) => (
+                <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "10px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>
                   <div style={{ flex: "2 1 220px" }}><b>{s.title}</b>
                     <div style={{ fontSize: 13, color: "var(--muted)" }}>{s.team} · {s.track} · {s.submitted_at ? `submitted ${fmtDate(s.submitted_at)}` : "not submitted"}</div></div>
                   <span className={`badge ${s.status === "SUBMITTED" ? "badge-ok" : "badge-warn"}`}>{s.status}</span>
@@ -698,19 +748,19 @@ function Console() {
                   <button className="btn-ghost btn-sm" style={{ marginLeft: "auto" }} onClick={() => toggleVisibility(s.id, !s.is_visible)}>
                     {s.is_visible ? "Hide from gallery" : "Show in gallery"}
                   </button>
-                </div>))}
+                </div>)} />
             </div>
           )}
           {reviewTab === "people" && (
             <div>
               {!people.length && <p style={{ color: "var(--muted)" }}>Nobody has joined yet.</p>}
-              {people.map((p: any) => (
-                <div key={p.user_id} style={{ display: "flex", gap: 10, padding: "8px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>
+              <TopList items={people} idKey={(p: any) => p.user_id} renderRow={(p: any) => (
+                <div style={{ display: "flex", gap: 10, padding: "8px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>
                   <b>{p.display_name}</b><span style={{ color: "var(--muted)" }}>{p.email}</span>
                   <span style={{ marginLeft: "auto", fontSize: 13, color: "var(--muted)" }}>
                     {p.team_name ? <>Team: <b>{p.team_name}</b></> : "No team yet"} · joined {fmtDate(p.joined_at)}
                   </span>
-                </div>))}
+                </div>)} />
             </div>
           )}
           {reviewTab === "team" && (
@@ -722,13 +772,13 @@ function Console() {
                 <button className="btn" type="submit">Add organizer</button>
               </form>
               <p className="form-note" style={{ marginTop: 0 }}>The account must already have the organizer role. Adding someone here grants access to this event only — it never grants a role.</p>
-              {orgs.map((o: any) => (
-                <div key={o.user_id} style={{ display: "flex", gap: 10, padding: "8px 0", borderTop: "1px solid var(--line)", alignItems: "center", flexWrap: "wrap" }}>
+              <TopList items={orgs} idKey={(o: any) => o.user_id} renderRow={(o: any) => (
+                <div style={{ display: "flex", gap: 10, padding: "8px 0", borderTop: "1px solid var(--line)", alignItems: "center", flexWrap: "wrap" }}>
                   <b>{o.display_name}</b><span style={{ color: "var(--muted)" }}>{o.email}</span>
                   <span className="badge badge-muted">{o.role}</span>
                   {o.is_owner && <span className="badge badge-ok">Creator</span>}
                   {!o.is_owner && <button className="link-btn" style={{ marginLeft: "auto" }} onClick={() => removeOrganizer(o.user_id)}>Remove</button>}
-                </div>))}
+                </div>)} />
               {!orgs.length && <p style={{ color: "var(--muted)" }}>No organizers listed.</p>}
             </div>
           )}

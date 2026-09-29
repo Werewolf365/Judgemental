@@ -18,6 +18,30 @@ function voterId(): string {
   return v;
 }
 
+function RankList({ items }: { items: any[] }) {
+  const [all, setAll] = useState(false);
+  if (!items.length) return null;
+  return (
+    <div>
+      <div style={{ maxHeight: 340, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 12, padding: "0 12px" }}>
+        {(all ? items : items.slice(0, 10)).map((r: any) => (
+          <div key={r.project_id} style={{ display: "flex", gap: 10, padding: "10px 0", borderTop: "1px solid var(--line)" }}>
+            <span className="badge badge-track">#{r.rank}</span>
+            <b>{r.title}</b>
+            <span style={{ marginLeft: "auto", color: "var(--muted)" }}>{r.votes} vote{r.votes === 1 ? "" : "s"} · score {Number(r.influence).toFixed(2)}</span>
+          </div>
+        ))}
+      </div>
+      {items.length > 10 && (
+        <div style={{ marginTop: 8 }}>
+          <button className="btn-ghost btn-sm" onClick={() => setAll(!all)}>
+            {all ? "Show top 10 only" : `Show all ${items.length}`}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function VotePage({ params }: { params: { slug: string } }) {
   const [box, setBox] = useState<any>(null);
   const [alloc, setAlloc] = useState<Record<string, number>>({});
@@ -113,12 +137,7 @@ export default function VotePage({ params }: { params: { slug: string } }) {
           </p>
           {standings.length > 0 ? (
             <><h3>Current standings{box.open ? " (live — public results publish at close)" : ""}</h3>
-              {standings.map((r: any) => (
-                <div key={r.project_id} style={{ display: "flex", gap: 10, padding: "8px 0", borderTop: "1px solid var(--line)" }}>
-                  <span className="badge badge-track">#{r.rank}</span>
-                  <b>{r.title}</b>
-                  <span style={{ marginLeft: "auto", color: "var(--muted)" }}>{r.votes} vote{r.votes === 1 ? "" : "s"} · score {Number(r.influence).toFixed(2)}</span>
-                </div>))}</>
+              <RankList items={standings} /></>
           ) : (
             <p style={{ color: "var(--muted)" }}>No votes cast yet — standings appear here once voting starts.</p>
           )}
@@ -134,12 +153,7 @@ export default function VotePage({ params }: { params: { slug: string } }) {
           <h2>{results ? "Final results" : "Voting is not open"}</h2>
           {!results && <p style={{ color: "var(--muted)" }}>{box.event?.voting_enabled ? "Voting has closed — results publish below once tallied." : "The organizer has not opened public voting for this event."}</p>}
           {results && (
-            <>{(results.ranking || []).map((r: any) => (
-              <div key={r.project_id} style={{ display: "flex", gap: 10, padding: "10px 0", borderTop: "1px solid var(--line)" }}>
-                <span className="badge badge-track">#{r.rank}</span>
-                <b>{r.title}</b>
-                <span style={{ marginLeft: "auto", color: "var(--muted)" }}>{r.votes} vote{r.votes === 1 ? "" : "s"} · score {Number(r.influence).toFixed(2)}</span>
-              </div>))}
+            <><RankList items={results.ranking || []} />
               <p className="form-note">{results.turnout?.voters || 0} voters · {results.turnout?.ballots || 0} ballots</p></>
           )}
         </div>

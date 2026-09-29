@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { api, fetchMe, fmtDate, type Me } from "@/lib/api";
 import { I } from "@/components/art";
 
-type Tab = "flags" | "blocks" | "audit";
+type Tab = "audit" | "flags" | "blocks";
 
 const KIND_TONE: Record<string, string> = {
   rate_limit: "badge-warn",
@@ -49,7 +49,7 @@ export default function Security() {
   const [ready, setReady] = useState(false);
   const [events, setEvents] = useState<any[]>([]);
   const [eventId, setEventId] = useState("");
-  const [tab, setTab] = useState<Tab>("flags");
+  const [tab, setTab] = useState<Tab>("audit");
   const [overview, setOverview] = useState<any>(null);
   const [flags, setFlags] = useState<any[]>([]);
   const [flagFilter, setFlagFilter] = useState("open");
@@ -62,10 +62,12 @@ export default function Security() {
   const [auditQ, setAuditQ] = useState("");
   const [audit, setAudit] = useState<any>(null);
   const [auditOffset, setAuditOffset] = useState(0);
+  const [subjects, setSubjects] = useState<Record<string, any[]>>({});
   const [msg, setMsg] = useState("");
   const router = useRouter();
   const isAdmin = me?.role === "ADMIN";
   const AUDIT_LIMIT = 100;
+  const evSlug = events.find((x: any) => x.id === eventId)?.slug || eventId;
 
   useEffect(() => {
     (async () => {
@@ -165,6 +167,21 @@ export default function Security() {
     } catch (e: any) { setMsg(e.message); }
   }
 
+  function prefillBlock(type: string, target: string) {
+    setBtType(type); setBtTarget(target);
+    setTab("blocks");
+  }
+
+  async function loadSubjects(fid: string) {
+    if (subjects[fid]) { setSubjects((s) => { const n = { ...s }; delete n[fid]; return n; }); return; }
+    try {
+      const d = await api(`/events/${eventId}/security/flags/${fid}/subjects`);
+      setSubjects((s) => ({ ...s, [fid]: d.subjects || [] }));
+    } catch (e: any) { setMsg(e.message); }
+  }
+
+  const BLOCK_WORD: Record<string, string> = { user: "Block user", ip: "Block IP", voter: "Block ballot key" };
+
   if (!ready) return <div className="card"><div className="skel" style={{ height: 200 }} /></div>;
   if (me?.role !== "ORGANIZER" && me?.role !== "ADMIN") {
     return (
@@ -203,9 +220,9 @@ export default function Security() {
         {eventId !== "__all__" ? (
           <>
             <div className="tabs">
+              <button className={tab === "audit" ? "on" : ""} onClick={() => setTab("audit")}>Audit log</button>
               <button className={tab === "flags" ? "on" : ""} onClick={() => setTab("flags")}>Flags ({overview?.open_flag_total ?? "…"})</button>
               <button className={tab === "blocks" ? "on" : ""} onClick={() => setTab("blocks")}>Blocks ({overview?.active_blocks ?? "…"})</button>
-              <button className={tab === "audit" ? "on" : ""} onClick={() => setTab("audit")}>Audit log</button>
               <button className="btn-ghost btn-sm" style={{ marginLeft: "auto", alignSelf: "center" }} onClick={() => eventId && loadAll(eventId)}>Refresh</button>
             </div>
             {tab === "flags" && (
@@ -235,14 +252,30 @@ export default function Security() {
                       </div>
                     )}
                     {f.status === "open" && (
-                      <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
-                        {f.subject_type === "user" && (
-                          <button className="btn-ghost btn-sm" onClick={() => {
-                            setBtType("user"); setBtTarget(f.subject);
-                            setTab("blocks");
-                          }}>Block this subject</button>
+                      <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
+                        <a className="btn-ghost btn-sm" href={`/events/${evSlug}`}>View event</a>
+                        {f.subject_type === "fingerprint" ? (
+                          <button className="btn-ghost btn-sm" onClick={() => loadSubjects(f.id)}>
+                            {subjects[f.id] ? "Hide writers" : "Show writers"}</button>
+                        ) : (
+                          <button className="btn-ghost btn-sm" onClick={() =>
+                            prefillBlock(f.subject_type === "ip" ? "ip" : f.subject_type === "voter" ? "voter" : "user", f.subject)}>
+                            {BLOCK_WORD[f.subject_type] || "Block this subject"}</button>
                         )}
                         <button className="link-btn" onClick={() => dismissFlag(f.id)}>Dismiss</button>
+                      </div>
+                    )}
+                    {subjects[f.id] && (
+                      <div style={{ marginTop: 6 }}>
+                        {subjects[f.id].map((s: any) => (
+                          <div key={s.type + s.target} style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 0", fontSize: 13.5, flexWrap: "wrap" }}>
+                            <span className="mono">{s.target}</span>
+                            {s.ballots != null && <span style={{ color: "var(--muted)" }}>{s.ballots} ballot{s.ballots === 1 ? "" : "s"}</span>}
+                            <button className="btn-ghost btn-sm" onClick={() => prefillBlock(s.type, s.target)}>
+                              {BLOCK_WORD[s.type] || "Block"}</button>
+                          </div>
+                        ))}
+                        {!subjects[f.id].length && <p style={{ color: "var(--muted)", fontSize: 13.5 }}>No ballots left under this fingerprint.</p>}
                       </div>
                     )}
                   </div>

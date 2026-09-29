@@ -8,6 +8,10 @@ import UncertaintyPanel from "@/components/UncertaintyPanel";
 
 type Tab = "rubric" | "judges" | "settings" | "results" | "uncertainty";
 
+// Uncertainty tab hidden from the console for now (flip to bring it back);
+// the panel, routes and data behind it are untouched.
+const SHOW_UNCERTAINTY = false;
+
 /** Organizer judging console: rubric builder, judge roster with load,
  *  judging settings, and results. Rendered for the console's working event.
  *  Everything here is organizer/admin-only server-side; this panel only
@@ -52,6 +56,7 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
   }, [eventId]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ title: string; body: React.ReactNode } | null>(null);
+  const [showBalance, setShowBalance] = useState(false);
 
   // rubric form
   const [cName, setCName] = useState("");
@@ -224,7 +229,7 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
       <div>
         <div style={{ maxHeight: 340, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 12, padding: "0 12px" }}>
           {items.slice(0, all ? items.length : 10).map((r: any) => (
-            <div key={r.project_id}>{renderRow(r)}</div>
+            <div key={r.project_id ?? r.user_id ?? r.id}>{renderRow(r)}</div>
           ))}
         </div>
         {items.length > 10 && (
@@ -277,7 +282,7 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
         <button className={tab === "judges" ? "on" : ""} onClick={() => setTab("judges")}>Judges ({judges.filter((j) => j.is_active).length})</button>
         <button className={tab === "settings" ? "on" : ""} onClick={() => setTab("settings")}>Settings</button>
         <button className={tab === "results" ? "on" : ""} onClick={() => setTab("results")}>Results</button>
-        {status && (!status.models?.bt_viable || status.models?.bayes_ready || results || bayes) && (
+        {SHOW_UNCERTAINTY && status && (!status.models?.bt_viable || status.models?.bayes_ready || results || bayes) && (
           <button className={tab === "uncertainty" ? "on" : ""} onClick={() => setTab("uncertainty")}>Uncertainty</button>
         )}
         <span className={`badge ${stage === "RESULTS_READY" ? "badge-ok" : stage === "OPEN" ? "badge-track" : "badge-muted"}`}
@@ -426,24 +431,27 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
           {status?.auto_assign?.enabled !== false && (
             <p className="form-note">Auto-assign sweeps in the background{autoCadence ? ` every ${autoCadence}` : ""}{autoLast ? ` — last sweep ${autoLast} (${autoCreated} new)` : " — first sweep pending"}. “Run batch assignment” does the same pass right now without touching that schedule.</p>)}
           {balance?.checklist?.length > 0 && (
-            <div className="deadline-bar" style={{ margin: "10px 0 4px", display: "block" }} role="status" aria-label="Assignment balance">
-              <b>Assignment balance</b>
-              <span style={{ fontWeight: 400 }}>
-                {" "}· workload spread {balance.workload.spread} ·{" "}
+            <div style={{ margin: "10px 0 4px", fontSize: 13.5, color: "var(--muted)" }}>
+              <span>workload spread {balance.workload.spread} ·{" "}
                 {balance.connected ? "one connected graph" : `${balance.components} disconnected components`} ·{" "}
-                {balance.pairwise_capacity} potential pairwise comparisons
-              </span>
-              <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontWeight: 400 }}>
-                {(balance.checklist || []).map((c: any) => (
-                  <li key={c.key}>
-                    {c.level === "ok" ? "✓ " : c.level === "warn" ? "⚠ " : "ℹ "}{c.detail}
-                  </li>
-                ))}
-              </ul>
+                {balance.pairwise_capacity} comparisons</span>
+              <button type="button" className="link-btn" title="Assignment balance details"
+                aria-label="Show assignment balance details" onClick={() => setShowBalance(!showBalance)}
+                style={{ marginLeft: 6, fontWeight: 800 }}>ⓘ</button>
+              {showBalance && (
+                <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+                  {(balance.checklist || []).map((c: any) => (
+                    <li key={c.key}>
+                      {c.level === "ok" ? "✓ " : c.level === "warn" ? "⚠ " : "ℹ "}{c.detail}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
-          {judges.map((j: any) => (
-            <div key={j.user_id} style={{ display: "flex", gap: 10, padding: "8px 0", borderTop: "1px solid var(--line)", alignItems: "center", flexWrap: "wrap" }}>
+          {!!judges.length && (
+          <TopTen items={judges} renderRow={(j: any) => (
+            <div style={{ display: "flex", gap: 10, padding: "8px 0", borderTop: "1px solid var(--line)", alignItems: "center", flexWrap: "wrap" }}>
               <b>{j.display_name}</b><span style={{ color: "var(--muted)" }}>{j.email}</span>
               {!j.is_active && <span className="badge badge-muted">Removed</span>}
               <span style={{ marginLeft: "auto", fontSize: 13, color: "var(--muted)" }}>
@@ -452,7 +460,8 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
               </span>
               {j.is_active && <button className="link-btn" onClick={() => removeJudge(j)}>Remove</button>}
             </div>
-          ))}
+          )} />
+          )}
           {!judges.length && <p style={{ color: "var(--muted)" }}>No judges on this event yet.</p>}
         </div>
       )}
@@ -553,7 +562,7 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
                   <span className="mono" style={{ marginLeft: "auto" }}>score {Number(r.score).toFixed(2)}</span>
                 </div>
               )} />
-              <p className="form-note">Ranges, Top-K chances and close calls live under the Uncertainty tab.</p>
+              <p className="form-note">Recalculate after extra judging for updated scores — every version is kept.</p>
             </div>
           ) : (
             <div className="empty"><h3>No ranking yet</h3>
@@ -561,7 +570,7 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
           )}
         </div>
       )}
-      {tab === "uncertainty" && status && (!status.models?.bt_viable || status.models?.bayes_ready || results || bayes) && (
+      {SHOW_UNCERTAINTY && tab === "uncertainty" && status && (!status.models?.bt_viable || status.models?.bayes_ready || results || bayes) && (
         <UncertaintyPanel eventId={eventId} onChanged={load} />
       )}
     </div>

@@ -79,12 +79,13 @@ turnout signals, and an organizer-readable event audit
 (`GET /events/{id}/audit` — no database client needed).
 
 `python scripts/pen_test_abuse.py` attacks a throwaway probe event across
-34 checks: budget overruns (including a concurrent double-spend race),
+45 checks: budget overruns (including a concurrent double-spend race),
 bad/negative identities, cross-event, draft and hidden targets, own-team
-votes, pre-close tally pulls, comment abuse plus identical-repost spam, and
-ballot/comment/register/login floods with and without spoofed
-`X-Forwarded-For` — then verifies every refusal lands in the organizer's
-(or admin's) audit view. Clean up after with `clean_probes.py`.
+votes, pre-close tally pulls, comment abuse plus identical-repost spam,
+stored-flag assertions, the full block lifecycle (voter + IP create,
+enforce, revoke), and ballot/comment/register/login floods with and without
+spoofed `X-Forwarded-For` — then verifies every refusal lands in the
+organizer's (or admin's) audit view. Clean up after with `clean_probes.py`.
 
 Fixed along the way: comment floods now carry the real event id into the
 audit (previously invisible to organizers), comments on draft/hidden

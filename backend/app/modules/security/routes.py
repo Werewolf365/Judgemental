@@ -101,6 +101,29 @@ async def list_flags(event_id: str, status: str = Query("", max_length=20),
     return {"flags": [_flag_out(f) for f in rows]}
 
 
+@router.get("/events/{event_id}/security/flags/{flag_id}/subjects")
+async def flag_subjects(event_id: str, flag_id: str,
+                        db: AsyncSession = Depends(get_db),
+                        user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
+    """Actionable writers behind a flag. Fingerprint flags resolve to the
+    voter keys sharing the hash (with ballot counts); direct flags return
+    their own subject. Everything returned is blockable as-is."""
+    from app.models import Ballot
+    e = await managed_event(db, user, event_id)
+    f = await db.get(SecurityFlag, flag_id)
+    if not f or f.event_id != e.id:
+        err(404, "not_found", "Flag not found")
+    if f.subject_type == "fingerprint":
+        res = await db.execute(select(
+            Ballot.voter_key, func.count(Ballot.id)).where(
+            Ballot.event_id == e.id, Ballot.fp_hash == f.subject).group_by(
+            Ballot.voter_key).order_by(func.count(Ballot.id).desc()))
+        return {"subjects": [
+            {"type": "voter", "target": vk, "ballots": n} for vk, n in res.all()]}
+    return {"subjects": [{"type": f.subject_type, "target": f.subject,
+                          "ballots": None}]}
+
+
 @router.post("/events/{event_id}/security/flags/{flag_id}/dismiss")
 async def dismiss_flag(event_id: str, flag_id: str, request: Request,
                        db: AsyncSession = Depends(get_db),

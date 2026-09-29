@@ -55,20 +55,11 @@ router = APIRouter(tags=["voting"])
 
 
 def _ip(request: Request | None) -> str:
-    """Right-most X-Forwarded-For (what the bundled nginx saw) else direct
-    peer. The gateway appends the real client, so the last entry is the only
-    one a client cannot spoof past it; the left-most is attacker-controlled
-    whenever anything reaches the API directly. Attribution only — never
-    authentication."""
-    if request is not None:
-        fwd = request.headers.get("x-forwarded-for")
-        if fwd:
-            parts = [p.strip() for p in fwd.split(",") if p.strip()]
-            if parts:
-                return parts[-1]
-        if request.client:
-            return request.client.host
-    return "unknown"
+    from app.shared.client_ip import client_ip
+    if request is None:
+        return "unknown"
+    peer = request.client.host if request.client else None
+    return client_ip(request.headers.get("x-forwarded-for"), peer)
 
 
 async def _public_event(db: AsyncSession, slug: str) -> Event:

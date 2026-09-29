@@ -1,2 +1,4 @@
 name,description,value,track,display_order
 Crowd Favorite,Most community influence,Glory,,0
+Best Design,Best on the Design track,$300,Design,1
+Second Place,Runner-up tally,$150,,2

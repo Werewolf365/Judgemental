@@ -48,12 +48,14 @@ influence at tally time (`backend/app/modules/voting/quadratic.py`).
 | Duplicate comments | Same author + project + body within 10 min → 429 `comment.duplicate` | `routes.post_comment` |
 | Eligibility | Ballots/comments require SUBMITTED + gallery-visible projects; anything else is the same 404 as missing | `service.require_commentable`, `routes.cast_ballot` |
 | Visibility | Results hidden until close; live standings organizer-only; drafts staff-only; team-only comment threads enforced | `routes.vote_results/standings/list_comments` |
+| Stored flags | Every detection writes a `security_flags` row (one per event/kind/subject; repeats reopen); organizers answer with `security_blocks` (user, voter key, IP) enforced on casts/posts, refusals audit as `security.block_enforced` | `security/routes.py`, Security page |
 
-IP attribution uses the **right-most** `X-Forwarded-For` entry (the address
-the bundled nginx actually saw) and falls back to the direct peer — the
-left-most entry is attacker-controlled past the gateway and is never
-trusted (`routes._ip`, `shared/audit._client_ip`). A 45-request flood with
-spoofed `XFF` still eats 429s instead of gaining a fresh bucket.
+IP attribution is proxy-aware: `X-Forwarded-For` is honored only from
+trusted peers (private ranges + loopback, `TRUSTED_PROXY_CIDRS`), taking
+the address the gateway actually saw; a direct client cannot launder a new
+identity per request (`shared/client_ip.py`, unit-tested). The Security
+page leads with the audit log, then flags (each with view-event plus
+block-IP/user actions), then blocks.
 
 ## 4. Judging integrity (T2, summarized)
 

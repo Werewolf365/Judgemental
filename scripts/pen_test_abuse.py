@@ -236,6 +236,42 @@ check("concurrent double-spend capped at budget",
       sorted(race_codes) == [200, 422] and spent == 10,
       f"codes={race_codes} spent={spent}")
 
+# ---- stored flags + blocks: the enforcement loop, end to end.
+# Runs BEFORE the floods (a blocked writer must still reach the gate).
+BV = "82345678-1234-4234-8234-123456789012"
+s, _ = J(f"/public/events/{EV}/ballot", None, "POST",
+         {"project_id": PID, "votes": 1, "voter_id": BV})
+check("flag-test voter casts", s == 200, f"got {s}")
+s, b = J(f"/events/{EV}/security/blocks", O, "POST",
+         {"target_type": "voter", "target": f"anon:{BV}", "reason": "pen test"})
+BID = b.get("block", {}).get("id") if s == 200 else None
+check("organizer blocks ballot key", BID is not None, f"got {s} {b}")
+s, _ = J(f"/public/events/{EV}/ballot", None, "POST",
+         {"project_id": PID, "votes": 2, "voter_id": BV})
+check("blocked voter refused (403)", s == 403, f"got {s}")
+s, b = J(f"/events/{EV}/security/blocks", O, "POST",
+         {"target_type": "ip", "target": "9.9.9.9", "reason": "pen test"})
+IPBID = b.get("block", {}).get("id") if s == 200 else None
+check("organizer blocks IP", IPBID is not None, f"got {s} {b}")
+s, _ = J(f"/public/events/{EV}/ballot", None, "POST",
+         {"project_id": PID, "votes": 1,
+          "voter_id": "92345678-1234-4234-8234-123456789012"},
+         extra_headers={"X-Forwarded-For": "9.9.9.9"})
+check("blocked IP refused (403)", s == 403, f"got {s}")
+s, b = J(f"/events/{EV}/security/blocks/{BID}", O, "DELETE")
+check("block revoked", s == 200, f"got {s}")
+s, _ = J(f"/public/events/{EV}/ballot", None, "POST",
+         {"project_id": PID, "votes": 1, "voter_id": BV})
+check("revoked voter writes again", s == 200, f"got {s}")
+s, b = J(f"/events/{EV}/security/blocks/{IPBID}", O, "DELETE")
+s, b = J(f"/events/{EV}/security/flags", O)
+kinds = {f["kind"] for f in b.get("flags", [])}
+s2, b2 = J(f"/events/{EV2}/security/flags", O)
+kinds2 = {f["kind"] for f in b2.get("flags", [])} if s2 == 200 else set()
+check("flags stored on abusive writes",
+      "comment_flood" in kinds and "own_team_vote" in kinds2,
+      f"{sorted(kinds)} / {sorted(kinds2)}")
+
 # ---- floods (this IP's vote bucket is now partly spent, which is fine:
 # 45 requests still overflow the 30/min budget deterministically)
 codes = {}
@@ -275,6 +311,15 @@ check("audit action filter works",
 s, b = J(f"/events/{EV}/voting", O)
 check("turnout flags shared-device voters",
       s == 200 and len(b.get("turnout", {}).get("fp_collisions", [])) > 0, f"{b.get('turnout')}")
+s, b = J(f"/events/{EV}/security/flags", O)
+kinds = {f["kind"] for f in b.get("flags", [])}
+check("rate-limit + shared-device flags stored",
+      "rate_limit" in kinds and "shared_device" in kinds, f"{sorted(kinds)}")
+s, b = J(f"/events/{EV}/audit", O)
+acts = {e["action"] for e in b.get("entries", [])}
+check("block lifecycle audited",
+      "security.block_created" in acts and "security.block_revoked" in acts
+      and "security.block_enforced" in acts, f"{sorted(acts)}")
 
 # ---- auth-surface floods (hour/minute buckets are per-route, so these run
 # last; rerunning this script within the hour trips the register setup —

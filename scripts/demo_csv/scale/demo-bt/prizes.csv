@@ -2,3 +2,5 @@ name,description,value,track,display_order
 Best Overall,Top of the BT ranking,$5000,,0
 Best ML Hack,Best on the ML track,$2500,ML Systems,1
 Crowd Pleaser,Audience pick,Glory,,2
+Best Mobile App,Best on the Mobile track,$1500,Mobile,3
+Best Data Story,Best on the Data Infra track,$1500,Data Infra,4
