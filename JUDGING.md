@@ -20,6 +20,9 @@ Rubric (organizer weights)
       - Laplace uncertainty: θ_std per project from inverse-Hessian diagonal
       - Close-call annotation: P(A>B), confidence High/Low per rank
   → Ranked results + versioned model runs + CSV export
+  → Optional judge/crowd blend: min-max normalized weighted sum with the
+    organizer's weights (BT thetas or bayes scores × crowd influence),
+    re-ranked; off by default, voting off always means judges alone
 ```
 
 Edge case (one judge per project, no pairs possible): the BT calculation
@@ -107,11 +110,12 @@ frontend can surface the warning to the organizer.
 ## Roles
 
 - **Organizer/admin** (event-scoped as usual): rubric CRUD, judge roster,
-  judging settings (window, judges per project, rolling on/off), batch
-  assignment, final calculation, results, CSV export. On Bayesian-scored
+  judging settings (window, judges per project, rolling on/off, crowd-blend
+  toggle + weight), batch assignment, final calculation, results, CSV export. On Bayesian-scored
   events additionally: run the scorer, interchange ranks on close calls,
   revert to the model order, and assign extra judging to named pool judges.
-- **Judge**: sees only assigned projects; scores each criterion 0–10;
+- **Judge**: sees only assigned projects; scores each criterion within its
+  declared scale (default 0–10, see "Rubric scales");
   submits final evaluations; reads only their own scores
   (`GET /judge/scores?judge=<someone-else>` is 403, which is also what the
   acceptance checker probes).
@@ -170,6 +174,15 @@ live pairs are refused, and closed windows are refused (reopen first, as with
 batch). It may exceed `judges_per_project`; extra judging is the purpose, not
 a coverage fill. Used by the Bayesian close-call workflow to place re-scoring
 exactly where uncertainty is highest.
+
+Background sweep (`judging/scheduler.py`, in-process asyncio loop, no new
+services): every `AUTO_ASSIGN_EVERY_SECONDS` (default 180 = 3 min testing
+cadence, production wants 1800; `AUTO_ASSIGN_ENABLED=0` disables it) each
+event with submitted projects gets one `assign_all_pending` pass in its own
+session. The manual "Run batch assignment" button hits the same endpoint and
+shares no state with the loop — pressing it cannot shift or duplicate a
+scheduled sweep. Single-worker assumption: concurrent sweeps would stay
+correct (FOR UPDATE + ON CONFLICT) but duplicate effort.
 
 ## Auditability
 
@@ -246,12 +259,13 @@ claims >80% of total spread ("scores vary mostly within judges — ranking
 certainty limited").
 
 When the model flags a close call as uncertain, the organizer — not the model —
-has the last word, all inside the Uncertainty tab. The tab itself is shown
-only when Bradley–Terry cannot run (no pairs, or a disconnected graph), never
-next to a viable BT ranking; a past Bayesian run keeps it visible so its
-history is never orphaned (decided server-side in `GET
-/events/{id}/judging` as `models: {bt_viable, bayes_ready}`, so tab and
-calculate gate cannot disagree):
+has the last word, through the bayes endpoints (surfaced in the console's
+Uncertainty view). Note on the current UI: the standalone Uncertainty tab is
+hidden behind a `SHOW_UNCERTAINTY = false` flag — the Results tab shows one
+model at a time with a BT/Bayes switcher (never both), and holds the full
+detail (ranges, close calls, swaps) for either model. The server-side routing
+rule below is unchanged and is what the calculate gates enforce; only the
+tab presentation is parked:
 
 - **Interchange two ranks** (`POST …/bayes/swap {project_a_id, project_b_id,
   reason?}`): writes a full manual-rank snapshot over the latest run; the model
@@ -270,10 +284,12 @@ closing, and recalculating: a new versioned run, history kept.
 
 ## Known limitations
 
-- **Sparse bridges** — connectivity (one component) is enforced, but bridge
-  *redundancy* (≥2 shared judges per group pair) is only warned about in the
-  health endpoint, not enforced during assignment. Single-judge bridges
-  produce near-flat likelihood directions. See Future work below.
+- **Sparse bridges** — connectivity (one component) is enforced, and a
+  bounded strengthen pass now opportunistically upgrades 1-shared pairs to
+  2-shared where a coverage-neutral verified swap exists (reported as
+  `strengthened`, `min_bridge`/`weak_bridges`) — but full pairwise redundancy
+  is unachievable at uniform coverage 2 without destroying balance, so thin
+  bridges are still reported rather than forced. See FW-1 for what remains.
 - **All-pairs quadratic dominance** — a judge scoring `n` projects contributes
   `n(n−1)/2` observations, treated as independent. Prolific judges dominate
   and transitive pairs are over-counted. Not fixed in v2. See Future work.
@@ -296,15 +312,17 @@ closing, and recalculating: a new versioned run, history kept.
 Items are ordered by estimated correctness impact. The first three address
 the largest remaining biases after the v2 improvements.
 
-### FW-1 — Bridge redundancy enforcement in assignment
+### FW-1 — Bridge redundancy enforcement in assignment (partially done)
 **Problem:** single-judge links between project groups produce near-flat BT
-likelihood directions; the health endpoint warns but assignment does not
+likelihood directions; the health endpoint warned but assignment did not
 enforce ≥2 shared judges per group pair.
 
-**Fix:** strengthen `_slot_ranking` in `assign.py` to count bridge weight
-(shared judges) rather than just new components. When filling the 3rd+ slot,
-prefer judges who *reinforce weak bridges* (existing 1-judge links) over those
-who open new components. This is an assignment-only change, no model change.
+**Shipped:** the `_strengthen_bridges` post-pass upgrades 1-shared pairs to
+2-shared via coverage-neutral verified swaps, preferring unevaluated drafts.
+**Remaining:** prefer reinforcing weak bridges *during* fill (3rd+ slot
+prefers judges who reinforce an existing 1-judge link over opening new
+components), i.e. strengthen `_slot_ranking` to count bridge weight rather
+than just new components. Still assignment-only, no model change.
 
 ### FW-2 — Plackett-Luce or adjacent-pairs likelihood
 **Problem:** all-pairs BT with `n(n−1)/2` observations per judge inflates
