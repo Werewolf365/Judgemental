@@ -88,6 +88,7 @@ export default function UncertaintyPanel({ eventId, onChanged }: { eventId: stri
   }
 
   const shown = data?.effective?.length ? data.effective : (data?.ranking || []);
+  const topK = data ? Math.min(data.top_k, shown.length) : 0;
   // Assign-a-judge appears ONLY on projects the model recommends re-evaluating
   // (members of a close call), not on settled rows.
   const reevaluate = new Set<string>();
@@ -150,6 +151,10 @@ export default function UncertaintyPanel({ eventId, onChanged }: { eventId: stri
         This model adjusts for strict and generous judges and shows how certain each position is.
         A Low-confidence position may change with more judging.
       </p>
+      <p className="form-note" style={{ marginTop: -6 }}>
+        How to read a row: <b>score</b> is the project's estimated quality (0–10 scale); <b>likely</b> is
+        where the true quality probably sits; <b>Top {topK || "…"}</b> is the chance it belongs in the top {topK || "…"}.
+        High means safe to announce — anything else wants more judging on the close calls below.</p>
       {!!warnModels.length && (
         <div className="deadline-bar" style={{ marginBottom: 12 }} role="alert">
           <span><b>⚠ Too uncertain to call</b> — half or more of the {warnModels.join(" + ")} positions
@@ -200,7 +205,7 @@ export default function UncertaintyPanel({ eventId, onChanged }: { eventId: stri
       )}
       {data ? (
         <div>
-          <h2>Top {data.top_k} <span style={{ fontWeight: 400, fontSize: 13, color: "var(--muted)" }}>
+          <h2>Top {topK} of {shown.length} <span style={{ fontWeight: 400, fontSize: 13, color: "var(--muted)" }}>
             run {data.run.id} · {fmtDate(data.run.finished_at)}</span></h2>
           {data.has_manual_overrides && (
             <div className="deadline-bar" style={{ marginBottom: 8 }} role="status">
@@ -218,7 +223,7 @@ export default function UncertaintyPanel({ eventId, onChanged }: { eventId: stri
                   <span className="mono">score {Number(r.score).toFixed(2)}</span>
                   <span style={{ fontSize: 13, color: "var(--muted)" }}>
                     likely {Number(r.likely_range[0]).toFixed(1)}–{Number(r.likely_range[1]).toFixed(1)}</span>
-                  <span style={{ fontSize: 13 }}>Top {data.top_k}: <b>{Math.round(r.p_top * 100)}%</b></span>
+                  <span style={{ fontSize: 13 }}>Top {topK}: <b>{Math.round(r.p_top * 100)}%</b></span>
                   <span className={`badge ${confBadge(r.confidence)}`}>{r.confidence}</span>
                   {reevaluate.has(r.project_id) && (
                     <AssignRow projectId={r.project_id} title={r.title} />

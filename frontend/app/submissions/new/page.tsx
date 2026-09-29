@@ -61,8 +61,8 @@ function NewSubInner({ preselectTeam }: { preselectTeam: string }) {
   if (noTeam) return (
     <div className="card empty" style={{ maxWidth: 560, margin: "40px auto" }}>
       <h1>Join or create a team first</h1>
-      <p>Projects belong to teams. Set one up from your workspace, then come back here.</p>
-      <a href="/dashboard" className="btn">Go to workspace <I.arrow /></a>
+      <p>Projects belong to teams. Set one up under My teams, then come back here.</p>
+      <a href="/teams" className="btn">Go to My teams <I.arrow /></a>
     </div>
   );
   async function onTeam(id: string) {
@@ -114,7 +114,7 @@ function NewSubInner({ preselectTeam }: { preselectTeam: string }) {
         <label>Repository URL</label><input value={f.repo_url} onChange={(e) => setF({ ...f, repo_url: e.target.value })} placeholder="https://…" inputMode="url" />
         <CustomAnswers eventId={f.event_id} value={custom} onChange={setCustom} />
         {msg && <div className="form-error">{msg}</div>}
-        <button className="btn" type="submit" disabled={busy || !!ownedByTeam[f.team_id]}>{busy ? "Saving…" : <>Save draft <I.arrow /></>}</button>
+        <button className="btn" type="submit" disabled={busy || !!ownedByTeam[f.team_id] || (!!f.event_id && !isOpen(f.event_id))}>{busy ? "Saving…" : <>Save draft <I.arrow /></>}</button>
       </form>
     </div>
   );

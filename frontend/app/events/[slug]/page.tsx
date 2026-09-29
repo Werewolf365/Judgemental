@@ -225,6 +225,7 @@ export default function EventPage({ params }: { params: { slug: string } }) {
   function handleJoinClick() {
     if (!me) { window.location.href = "/login"; return; }
     if (isStaff) { setMsg("Your role runs events rather than competing in them, so there is nothing to register for."); return; }
+    if (regClosed || regNotOpen) return;
     setShowRegForm(true);
   }
 
@@ -238,7 +239,7 @@ export default function EventPage({ params }: { params: { slug: string } }) {
       setMsg("Registration complete! Redirecting to your workspace to create a team…");
       // Give the user a moment to read the message, then redirect to dashboard
       // with the event preselected for team creation.
-      setTimeout(() => { window.location.href = `/dashboard?event=${data.event.id}`; }, 1200);
+      setTimeout(() => { window.location.href = `/teams?event=${data.event.id}`; }, 1200);
     } catch (e: any) { setMsg(e.message); }
     finally { setBusy(false); }
   }
@@ -257,9 +258,17 @@ export default function EventPage({ params }: { params: { slug: string } }) {
         <Link href="/events" className="btn">Browse events</Link></div>
     : <div className="card"><div className="skel" style={{ height: 160 }} /></div>;
   const ev = data.event;
+  // Registration window is server-enforced (POST /join 403s outside it); the
+  // button mirrors it so nobody is offered a form that is guaranteed to bounce.
+  const nowTs = Date.now();
+  const regCloseTs = ev.registration_close ? new Date(ev.registration_close).getTime() : null;
+  const regOpenTs = ev.registration_start ? new Date(ev.registration_start).getTime() : null;
+  const regClosed = regCloseTs != null && nowTs > regCloseTs;
+  const regNotOpen = regOpenTs != null && nowTs < regOpenTs;
+  const regBlocked = regClosed || regNotOpen;
   return (
     <div>
-      {showRegForm && !isStaff && (
+      {showRegForm && !isStaff && !regBlocked && (
         <RegistrationOverlay me={me} onComplete={completeRegistration} onCancel={() => setShowRegForm(false)} />
       )}
       <div className="hero" style={{ paddingBottom: 0 }}>
@@ -278,6 +287,10 @@ export default function EventPage({ params }: { params: { slug: string } }) {
                   <Link href={`/organizer?event=${ev.id}`} className="btn">Edit event <I.arrow /></Link>
                 )}
               </>
+            ) : regBlocked ? (
+              <span className="badge badge-muted" title={regClosed ? `Registration closed ${fmtDate(ev.registration_close)}` : `Registration opens ${fmtDate(ev.registration_start)}`}>
+                <I.clock /> {regClosed ? "Registration closed" : `Opens ${fmtDate(ev.registration_start)}`}
+              </span>
             ) : (
               <button className="btn" onClick={handleJoinClick} disabled={busy || joined}>{busy ? "Joining…" : joined ? "You're registered" : me ? "Join this event" : "Log in to join"} <I.arrow /></button>
             )}

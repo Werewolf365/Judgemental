@@ -56,6 +56,13 @@ export default function Events() {
       <div className="grid grid-2">
         {shown.map((e) => {
           const st = stateByEvent[e.id];
+          // Registration window is server-enforced; mirror it so the card
+          // never offers a form that is guaranteed to bounce.
+          const t = Date.now();
+          const rc = e.registration_close ? new Date(e.registration_close).getTime() : null;
+          const ro = e.registration_start ? new Date(e.registration_start).getTime() : null;
+          const closed = rc != null && t > rc;
+          const notOpen = ro != null && t < ro;
           return (
             <div key={e.id} className="card">
               <span className="badge badge-ok"><span className="pip pip-green" /> Open for builders</span>
@@ -64,7 +71,9 @@ export default function Events() {
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
                 {!loggedIn && <Link href="/login" className="btn btn-sm">Log in to join</Link>}
                 {loggedIn && isStaff && <span className="badge badge-track" title="Staff and judges run events rather than competing in them."><I.team /> Staff account</span>}
-                {loggedIn && !isStaff && !st?.joined && <Link href={`/events/${e.slug}`} className="btn btn-sm">Register <I.arrow /></Link>}
+                {loggedIn && !isStaff && !st?.joined && !closed && !notOpen && <Link href={`/events/${e.slug}`} className="btn btn-sm">Register <I.arrow /></Link>}
+                {loggedIn && !isStaff && !st?.joined && closed && <span className="badge badge-muted"><I.clock /> Registration closed</span>}
+                {loggedIn && !isStaff && !st?.joined && notOpen && <span className="badge badge-muted"><I.clock /> Opens {fmtDate(e.registration_start)}</span>}
                 {loggedIn && !isStaff && st?.joined && <span className="badge badge-ok"><span className="pip pip-green" /> Registered</span>}
                 {loggedIn && st?.joined && st?.teamId && !isStaff && (
                   <Link href={`/submissions/new?team=${st.teamId}`} className="btn btn-sm">Submit project <I.arrow /></Link>

@@ -14,5 +14,5 @@ export default function JoinTeam({ params }: { params: { token: string } }) {
   }, [params.token]);
   return <div className="card empty" style={{ maxWidth: 560, margin: "40px auto" }}>
     <h1>{ok ? "Team joined" : "Join team"}</h1><p>{msg}</p>
-    <a href="/dashboard" className="btn">Go to workspace <I.arrow /></a></div>;
+    <a href="/teams" className="btn">View my teams <I.arrow /></a></div>;
 }

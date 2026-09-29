@@ -66,7 +66,7 @@ export default function Home() {
         {isParticipant ? (
           <>
             <div className="card"><h3><I.pin /> Join</h3><p style={{ color: "var(--muted)" }}>Register for an event in seconds. Your team picks its track later, together, when it creates its project.</p><Link href="/events">Browse events <I.arrow /></Link></div>
-            <div className="card"><h3><I.team /> Team up</h3><p style={{ color: "var(--muted)" }}>Create a team or paste a teammate's invite link. One team per event, one submission per team.</p><Link href="/dashboard">Go to workspace <I.arrow /></Link></div>
+            <div className="card"><h3><I.team /> Team up</h3><p style={{ color: "var(--muted)" }}>Create a team or paste a teammate's invite link. One team per event, one submission per team.</p><Link href="/teams">Manage teams <I.arrow /></Link></div>
             <div className="card"><h3><I.cal /> Submit</h3><p style={{ color: "var(--muted)" }}>Save a draft, pick your team's track, and submit before the server-enforced UTC deadline.</p><Link href="/submissions/new">Start a project <I.arrow /></Link></div>
           </>
         ) : isJudge ? (

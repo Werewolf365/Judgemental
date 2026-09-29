@@ -6,6 +6,8 @@ class EventOut(BaseModel):
     slug: str
     name: str
     description: Optional[str]
+    registration_start: Optional[str] = None
+    registration_close: Optional[str] = None
     submissions_close: Optional[str]
     status: str
 

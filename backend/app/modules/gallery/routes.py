@@ -71,6 +71,8 @@ async def public_events(db: AsyncSession = Depends(get_db)):
     out = []
     for e in res.scalars().all():
         out.append({"id": e.id, "slug": e.slug, "name": e.name, "description": e.description,
+                    "registration_start": e.registration_start.isoformat() if e.registration_start else None,
+                    "registration_close": e.registration_close.isoformat() if e.registration_close else None,
                     "submissions_close": e.submissions_close.isoformat() if e.submissions_close else None,
                     "status": "PUBLISHED"})
     return {"events": out}

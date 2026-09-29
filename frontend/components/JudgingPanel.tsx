@@ -259,6 +259,14 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
   const autoCadence = autoSecs == null ? "" : autoSecs >= 60 ? `${Math.round(autoSecs / 60)} min` : `${autoSecs} s`;
   const autoLast = status?.auto_assign?.last_run ? fmtDate(status.auto_assign.last_run) : null;
   const autoCreated = status?.auto_assign?.last_created ?? 0;
+  // One home for rankings: the Results tab shows one model at a time with a
+  // switcher (never both), and the Uncertainty tab holds the full detail
+  // (ranges, close calls, swaps) for either model.
+  const relWord = (r: number) =>
+    r >= 0.8 ? "very consistent with the other judges"
+    : r >= 0.5 ? "usually agrees with the other judges"
+    : "often disagrees with the other judges";
+  const relBadge = (r: number) => r >= 0.8 ? "badge-ok" : r >= 0.5 ? "badge-track" : "badge-muted";
 
   return (
     <div className="card field">
@@ -453,7 +461,7 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
             <button className="btn-ghost" disabled={busy || stage === "OPEN" || stage === "NOT_STARTED"} onClick={calculateBayes}
               title={stage === "OPEN" || stage === "NOT_STARTED" ? "Available once the judging deadline passes" : "Run the hierarchical Bayes scorer"}>
               Calculate Bayes scores</button>
-            <a className="btn-ghost" href={`/api/export.csv?event_id=${eventId}`} download
+            <a className="btn" href={`/api/export.csv?event_id=${eventId}`} download
               title="One row per evaluation at any stage: project, team + leader, judge, every criterion score with weight and normalized share, totals, and ranks once calculated">
               Export CSV</a>
             {(stage === "OPEN" || stage === "NOT_STARTED") && (
@@ -472,20 +480,29 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
           )}
           {model === "bt" && results ? (
             <div key={`bt-${eventId}`}>
-              <h2>Final ranking</h2>
+              <h2>Final ranking <span style={{ fontWeight: 400, fontSize: 13, color: "var(--muted)" }}>
+                run {results.run.id} · {results.run.n_comparisons} comparisons · {fmtDate(results.run.finished_at)}</span></h2>
+              <p className="form-note" style={{ marginTop: -4 }}>
+                Strengths are relative, not marks out of 10 — a higher number beat a lower one, and bigger
+                gaps mean more decisive wins. The ± band is the model's uncertainty; High means safe to announce.</p>
               <TopTen items={results.ranking} renderRow={(r: any) => (
-                <div style={{ display: "flex", gap: 10, padding: "8px 0", borderTop: "1px solid var(--line)", alignItems: "center" }}>
+                <div style={{ display: "flex", gap: 10, padding: "8px 0", borderTop: "1px solid var(--line)", alignItems: "center", flexWrap: "wrap" }}>
                   <span className="badge badge-track">#{r.rank}</span>
                   <b>{r.title}</b><span style={{ color: "var(--muted)" }}>{r.team} · {r.track}</span>
-                  <span className="mono" style={{ marginLeft: "auto" }}>θ {Number(r.theta).toFixed(3)}</span>
+                  <span className="mono" style={{ marginLeft: "auto" }}>
+                    strength {Number(r.theta).toFixed(2)}{r.theta_std != null ? ` ± ${Number(r.theta_std).toFixed(2)}` : ""}</span>
+                  {r.confidence && (
+                    <span className={`badge ${r.confidence === "High" ? "badge-ok" : r.confidence === "Medium" ? "badge-track" : "badge-muted"}`}>{r.confidence}</span>)}
                 </div>
               )} />
               <h2 style={{ marginTop: 16 }}>Judge reliability</h2>
+              <p className="form-note" style={{ marginTop: -4 }}>
+                How much each judge agreed with the rest of the panel — consistent judges carry more weight in the ranking.</p>
               {results.judges.map((j: any) => (
-                <div key={j.user_id} style={{ display: "flex", gap: 10, padding: "6px 0", borderTop: "1px solid var(--line)", fontSize: 14 }}>
+                <div key={j.user_id} style={{ display: "flex", gap: 10, padding: "6px 0", borderTop: "1px solid var(--line)", fontSize: 14, alignItems: "center", flexWrap: "wrap" }}>
                   <b>{j.display_name}</b>
-                  <span style={{ marginLeft: "auto", color: "var(--muted)" }}>
-                    r = <b style={{ color: "var(--ink)" }}>{Number(j.reliability).toFixed(3)}</b> · prior {j.prior_mu} (σ {j.prior_sigma})</span>
+                  <span className={`badge ${relBadge(Number(j.reliability))}`}>{relWord(Number(j.reliability))}</span>
+                  <span style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 13 }}>reliability {Number(j.reliability).toFixed(2)}</span>
                 </div>
               ))}
               {!!runs.length && (
@@ -500,7 +517,7 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
             </div>
           ) : model === "bayes" && bayes ? (
             <div key={`bayes-${eventId}`}>
-              <h2>Top {bayes.top_k}</h2>
+              <h2>Top {Math.min(bayes.top_k, (bayes.effective?.length ? bayes.effective : bayes.ranking || []).length)} of {(bayes.effective?.length ? bayes.effective : bayes.ranking || []).length}</h2>
               <TopTen items={bayes.effective?.length ? bayes.effective : bayes.ranking} renderRow={(r: any) => (
                 <div style={{ display: "flex", gap: 10, padding: "8px 0", borderTop: "1px solid var(--line)", alignItems: "center", flexWrap: "wrap" }}>
                   <span className="badge badge-track">#{r.effective_rank ?? r.rank}</span>
@@ -517,7 +534,6 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
           )}
         </div>
       )}
-
       {tab === "uncertainty" && status && (!status.models?.bt_viable || status.models?.bayes_ready || results || bayes) && (
         <UncertaintyPanel eventId={eventId} onChanged={load} />
       )}

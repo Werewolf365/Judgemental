@@ -96,7 +96,7 @@ export default function Transfer({ eventId, onClose }: { eventId: string; onClos
               <select value={impDs} onChange={(e) => setImpDs(e.target.value)} style={{ marginBottom: 0 }}>
                 {IMPORTABLE.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
               </select></div>
-            <label className="btn-ghost btn-sm" style={{ cursor: "pointer" }}>
+            <label className="btn btn-sm" style={{ cursor: "pointer" }}>
               Choose CSV…
               <input type="file" accept=".csv,text/csv" hidden disabled={busy}
                 onChange={(e) => { doImport(e.target.files?.[0]); e.target.value = ""; }} />

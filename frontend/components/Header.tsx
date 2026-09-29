@@ -6,8 +6,10 @@ import { fetchMe, logout, initials, type Me } from "@/lib/api";
 
 export default function Header() {
   const [me, setMe] = useState<Me | undefined>(undefined);
+  const [open, setOpen] = useState(false);
   const path = usePathname();
   useEffect(() => { fetchMe().then(setMe); }, [path]);
+  useEffect(() => { setOpen(false); }, [path]);
 
   const isOrg = me && (me.role === "ORGANIZER" || me.role === "ADMIN");
   const isJudge = me?.role === "JUDGE";
@@ -34,7 +36,7 @@ export default function Header() {
             </span>
             Dogfood
           </Link>
-          <nav className="main-nav" aria-label="Primary">
+          <nav className={`main-nav${open ? " open" : ""}`} aria-label="Primary">
             {link("/events", "Events")}
             {me && !isJudge && link("/dashboard", isOrg ? "Overview" : "Dashboard")}
             {showTeams && link("/teams", "My teams")}
@@ -43,6 +45,8 @@ export default function Header() {
             {me?.role === "ADMIN" && link("/admin", "Admin")}
           </nav>
           <div className="header-right">
+            <button className="nav-toggle" aria-label={open ? "Close menu" : "Open menu"} aria-expanded={open}
+              onClick={() => setOpen((o) => !o)}>☰</button>
             {me === undefined ? null : me === null ? (
               <>
                 <Link href="/login" className="btn-ghost btn-sm">Log in</Link>
