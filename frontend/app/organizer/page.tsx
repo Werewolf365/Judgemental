@@ -67,8 +67,6 @@ function Console() {
   const [voting, setVoting] = useState<any>(null);
   const [vClose, setVClose] = useState("");
   const [turnout, setTurnout] = useState<any>(null);
-  const [audit, setAudit] = useState<any[]>([]);
-  const [auditQ, setAuditQ] = useState("");
   // One-shot confirmation after a publish, so the moment of going live is
   // unmistakable rather than a line of text that scrolls past.
   const [notice, setNotice] = useState<{ title: string; body: React.ReactNode } | null>(null);
@@ -116,14 +114,6 @@ function Console() {
       setVoting(d.config);
       setMsg("Voting settings saved.");
       await loadVoting(detail.event.id);
-    } catch (e: any) { setMsg(e.message); }
-  }
-
-  async function loadAudit() {
-    if (!detail) return;
-    try {
-      const d = await api(`/events/${detail.event.id}/audit?q=${encodeURIComponent(auditQ)}&limit=100`);
-      setAudit(d.entries || []);
     } catch (e: any) { setMsg(e.message); }
   }
 
@@ -668,16 +658,7 @@ function Console() {
                   <button className="btn-ghost btn-sm" onClick={() => loadVoting(ev.id)}>Refresh</button>
                 </div>
                 <h3>Event audit trail</h3>
-                <p style={{ color: "var(--muted)", fontSize: 13.5 }}>Every security-relevant action on this event — votes, refusals, moderation — readable here, no database client needed.</p>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input value={auditQ} onChange={(e) => setAuditQ(e.target.value)} placeholder="Filter actions, emails…" style={{ flex: 1 }} />
-                  <button className="btn-ghost btn-sm" onClick={loadAudit}>Search audit</button>
-                </div>
-                {!audit.length && <p style={{ color: "var(--muted)" }}>No matching entries — search to load.</p>}
-                {audit.map((a: any) => (
-                  <div key={a.id} style={{ padding: "6px 0", borderTop: "1px solid var(--line)", fontSize: 13.5 }}>
-                    <b className="mono">{a.action}</b> <span style={{ color: "var(--muted)" }}>{a.actor_email || "anonymous"} · {a.created_at ? new Date(a.created_at).toLocaleString() : ""}{a.ip ? ` · ${a.ip}` : ""}</span>
-                  </div>))}
+                <p style={{ color: "var(--muted)", fontSize: 13.5 }}>Every security-relevant action on this event — votes, refusals, blocks — now lives on the <a href={ev?.id ? `/security?event=${ev.id}` : "/security"}>Security page</a>, filterable and searchable, with flags and blocks alongside.</p>
               </>
             )}
             <div style={{ display: "flex", gap: 10, marginTop: 14 }}>

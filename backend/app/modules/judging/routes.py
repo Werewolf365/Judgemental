@@ -136,11 +136,58 @@ async def delete_criterion(criterion_id: str, request: Request,
     return {"ok": True}
 
 
+async def _judging_progress(db: AsyncSession, event_id: str) -> dict:
+    """Completion summary for the organizer progress view.
+
+    Overall % = submitted evaluations over live (non-REVOKED) assignments,
+    plus per-judge and per-project breakdowns. Pure counts — no estimates.
+    """
+    from sqlalchemy import func
+    from app.models import EventJudge, JudgeAssignment, AssignmentStatus, Evaluation, EvaluationStatus, Project, User
+    live = (await db.execute(select(JudgeAssignment.judge_user_id, JudgeAssignment.project_id).where(
+        JudgeAssignment.event_id == event_id,
+        JudgeAssignment.status != AssignmentStatus.REVOKED))).all()
+    sub = (await db.execute(select(Evaluation.judge_user_id, Evaluation.project_id).where(
+        Evaluation.event_id == event_id,
+        Evaluation.status == EvaluationStatus.SUBMITTED))).all()
+    sub_set = set(sub)
+    # Only submitted evaluations against a live assignment count toward
+    # completion — revoked work that was still scored stays visible in
+    # history, not in the progress bar.
+    live_set = set(live)
+    done_live = len(sub_set & live_set)
+    judges = (await db.execute(select(User.id, User.display_name).join(
+        EventJudge, EventJudge.user_id == User.id).where(
+        EventJudge.event_id == event_id, EventJudge.is_active == True).order_by(  # noqa
+        User.display_name))).all()
+    per_judge = []
+    for uid, name in judges:
+        a = sum(1 for j, _ in live if j == uid)
+        s = sum(1 for j, _ in sub if j == uid)
+        per_judge.append({"user_id": uid, "display_name": name,
+                           "submitted": s, "assigned": a,
+                          "pct": round(100 * s / a) if a else None})
+    projects = (await db.execute(select(Project.id, Project.title).where(
+        Project.event_id == event_id).order_by(Project.title))).all()
+    per_project = []
+    for pid, title in projects:
+        a = sum(1 for _, p in live if p == pid)
+        s = sum(1 for _, p in sub if p == pid)
+        if a or s:
+            per_project.append({"project_id": pid, "title": title,
+                                "submitted": s, "assigned": a,
+                                "pct": round(100 * s / a) if a else None})
+    total, done = len(live_set), done_live
+    return {"submitted": done, "assigned": total,
+            "pct": round(100 * done / total) if total else None,
+            "per_judge": per_judge, "per_project": per_project}
+
+
 @router.get("/events/{event_id}/judging")
 async def judging_status(event_id: str, db: AsyncSession = Depends(get_db),
                          user: User = Depends(require_roles("ORGANIZER", "ADMIN"))):
     """Config + derived stage + counts. The console renders from this."""
-    from app.models import EventJudge, JudgeAssignment, Evaluation, EvaluationStatus
+    from app.models import EventJudge, JudgeAssignment, AssignmentStatus, Evaluation, EvaluationStatus, Project, User
     from app.modules.judging.pairwise import connected_components, generate_pairs
     from sqlalchemy import func
     e = await managed_event(db, user, event_id)
@@ -191,6 +238,7 @@ async def judging_status(event_id: str, db: AsyncSession = Depends(get_db),
             "evaluations_submitted": completed,
             "criteria": len(res.scalars().all()),
         },
+        "progress": await _judging_progress(db, e.id),
     }
 
 

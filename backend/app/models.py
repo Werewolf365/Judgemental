@@ -607,3 +607,38 @@ class ApiKey(Base):
     last_used_at = Column(DateTime(timezone=True), nullable=True)
     revoked_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
+
+class SecurityFlag(Base):
+    """Explicit, stored abuse signal per event (migration 0021).
+
+    One row per (event, kind, subject): rate-limit hits, own-team vote
+    attempts, shared-device collisions, comment floods. Kinds are plain
+    strings so new detectors need no schema change. A repeat offence
+    reopens a dismissed flag rather than duplicating it.
+    """
+    __tablename__ = "security_flags"
+    __table_args__ = (UniqueConstraint("event_id", "kind", "subject", name="uq_flag_event_kind_subject"),)
+    id = Column(Text, primary_key=True, default=_uuid)
+    event_id = Column(Text, ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind = Column(Text, nullable=False)
+    subject_type = Column(Text, nullable=False)
+    subject = Column(Text, nullable=False)
+    detail = Column(JSON, nullable=False, default=dict, server_default="{}")
+    status = Column(Text, nullable=False, default="open", server_default="open")
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class SecurityBlock(Base):
+    """Organizer-issued block (migration 0021): user id or IP, enforced on
+    ballot casts and comment posts until revoked (revocation is a timestamp,
+    never a delete, so the trail survives)."""
+    __tablename__ = "security_blocks"
+    id = Column(Text, primary_key=True, default=_uuid)
+    event_id = Column(Text, ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True)
+    target_type = Column(Text, nullable=False)
+    target = Column(Text, nullable=False, index=True)
+    reason = Column(Text, nullable=True)
+    created_by = Column(Text, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)

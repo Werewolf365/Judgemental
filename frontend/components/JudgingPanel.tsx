@@ -387,6 +387,33 @@ export default function JudgingPanel({ eventId }: { eventId: string }) {
       {tab === "judges" && (
         <div>
           <p style={{ color: "var(--muted)" }}>Only these accounts can score this event's projects. Everyone on the roster must already hold the JUDGE role — adding someone here never grants it.</p>
+          {status?.progress && (
+            <div className="deadline-bar" style={{ margin: "10px 0 4px", display: "block" }} role="status" aria-label="Judging progress">
+              <b>Completion — {status.progress.pct == null ? "nothing assigned yet" : `${status.progress.pct}% · ${status.progress.submitted} of ${status.progress.assigned} evaluations submitted`}</b>
+              {status.progress.pct != null && (
+                <div className="pbar big" style={{ marginTop: 8 }}><span style={{ width: `${status.progress.pct}%` }} /></div>)}
+              {!!status.progress.per_judge?.length && (
+                <div style={{ marginTop: 10 }}>
+                  {status.progress.per_judge.map((j: any) => (
+                    <div key={j.user_id} style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 6, fontWeight: 400 }}>
+                      <span style={{ flex: "0 0 150px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13.5 }}>{j.display_name}</span>
+                      <span className="pbar" style={{ flex: 1 }}><span style={{ width: `${j.pct ?? 0}%` }} /></span>
+                      <span style={{ flex: "0 0 86px", textAlign: "right", fontSize: 13 }}>{j.pct == null ? "no work" : `${j.pct}% · ${j.submitted}/${j.assigned}`}</span>
+                    </div>
+                  ))}
+                </div>)}
+              {!!status.progress.per_project?.length && (
+                <div style={{ marginTop: 10 }}>
+                  {status.progress.per_project.map((p: any) => (
+                    <div key={p.project_id} style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 6, fontWeight: 400 }}>
+                      <span style={{ flex: "0 0 150px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13.5 }}>{p.title}</span>
+                      <span className="pbar" style={{ flex: 1 }}><span style={{ width: `${p.pct ?? 0}%` }} /></span>
+                      <span style={{ flex: "0 0 86px", textAlign: "right", fontSize: 13 }}>{p.pct == null ? "—" : `${p.pct}% · ${p.submitted}/${p.assigned}`}</span>
+                    </div>
+                  ))}
+                </div>)}
+            </div>
+          )}
           <form onSubmit={addJudge} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", margin: "10px 0 4px" }}>
             <div style={{ flex: "1 1 240px" }}><label htmlFor="judge-email">Add a judge by email</label>
               <input id="judge-email" value={jEmail} onChange={(e) => setJEmail(e.target.value)} placeholder="judge@example.org" /></div>

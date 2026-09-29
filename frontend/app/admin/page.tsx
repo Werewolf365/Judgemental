@@ -1,8 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, fetchMe, fmtDate, type Me } from "@/lib/api";
-import { I } from "@/components/art";
+import { api, fetchMe, type Me } from "@/lib/api";
+import Link from "next/link";
 
 const ROLE_TONE: Record<string, string> = {
   ADMIN: "badge-ok",
@@ -109,85 +109,6 @@ function RolesTab({ me }: { me: Me }) {
           );
         })}
         {!users.length && <p style={{ color: "var(--muted)" }}>No accounts match.</p>}
-      </div>
-    </div>
-  );
-}
-
-function AuditTab() {
-  const [action, setAction] = useState("");
-  const [q, setQ] = useState("");
-  const [data, setData] = useState<any>(null);
-  const [offset, setOffset] = useState(0);
-  const [msg, setMsg] = useState("");
-  const LIMIT = 100;
-
-  async function load(nextOffset = 0, act = action, term = q) {
-    setMsg("");
-    const qs = new URLSearchParams({ limit: String(LIMIT), offset: String(nextOffset) });
-    if (act) qs.set("action", act);
-    if (term.trim()) qs.set("q", term.trim());
-    try {
-      const d = await api(`/admin/audit?${qs}`);
-      setData(d); setOffset(nextOffset);
-    } catch (e: any) { setMsg(e.message); }
-  }
-  useEffect(() => { load(0); }, []);
-
-  const total = data?.total || 0;
-  const from = total ? offset + 1 : 0;
-  const to = Math.min(offset + LIMIT, total);
-
-  return (
-    <div>
-      <p style={{ color: "var(--muted)" }}>
-        Every sign-in, role change, organizer assignment, event edit and gallery moderation action, newest first.
-        Passwords and session tokens are never recorded.
-      </p>
-      <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", margin: "12px 0" }}>
-        <div style={{ flex: "1 1 200px" }}>
-          <label htmlFor="audit-action">Action</label>
-          <select id="audit-action" value={action} onChange={(e) => setAction(e.target.value)}>
-            <option value="">All actions</option>
-            {(data?.actions || []).map((a: string) => <option key={a} value={a}>{a}</option>)}
-          </select>
-        </div>
-        <div style={{ flex: "1 1 200px" }}>
-          <label htmlFor="audit-q">Search actor, action or target</label>
-          <input id="audit-q" value={q} onChange={(e) => setQ(e.target.value)} placeholder="organizer@local.test"
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); load(0); } }} />
-        </div>
-        <button className="btn" onClick={() => load(0)}>Apply</button>
-      </div>
-      {msg && <p role="alert">{msg}</p>}
-      <div>
-        {(data?.entries || []).map((e: any) => (
-          <div key={e.id} style={{ padding: "8px 0", borderTop: "1px solid var(--line)" }}>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <span className="badge badge-track">{e.action}</span>
-              <b>{e.actor_email || "anonymous"}</b>
-              <span style={{ color: "var(--muted)", fontSize: 13 }}>
-                {fmtDate(e.created_at)}{e.ip ? ` · ${e.ip}` : ""}
-              </span>
-              {e.target_id && <span style={{ color: "var(--muted)", fontSize: 13 }}>→ {e.target_type}:{e.target_id}</span>}
-            </div>
-            {e.detail && Object.keys(e.detail).length > 0 && (
-              <div className="mono" style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 3, wordBreak: "break-word" }}>
-                {JSON.stringify(e.detail)}
-              </div>
-            )}
-          </div>
-        ))}
-        {data && !data.entries?.length && <p style={{ color: "var(--muted)" }}>No entries match.</p>}
-      </div>
-      <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 12 }}>
-        <button className="btn-ghost btn-sm" disabled={offset === 0} onClick={() => load(Math.max(0, offset - LIMIT))}>
-          <I.back /> Newer
-        </button>
-        <span style={{ fontSize: 13, color: "var(--muted)" }}>{from}–{to} of {total}</span>
-        <button className="btn-ghost btn-sm" disabled={to >= total} onClick={() => load(offset + LIMIT)}>
-          Older <I.arrow />
-        </button>
       </div>
     </div>
   );
@@ -358,7 +279,7 @@ function KeysTab() {
 export default function Admin() {
   const [me, setMe] = useState<Me>(null);
   const [ready, setReady] = useState(false);
-  const [tab, setTab] = useState<"roles" | "audit" | "keys">("roles");
+  const [tab, setTab] = useState<"roles" | "keys">("roles");
   const router = useRouter();
 
   useEffect(() => {
@@ -376,7 +297,7 @@ export default function Admin() {
     return (
       <div>
         <div className="page-head"><h1>Administration</h1></div>
-        <AccessDenied what="Role management and the audit log" />
+        <AccessDenied what="Role management" />
       </div>
     );
   }
@@ -386,15 +307,14 @@ export default function Admin() {
       <div className="page-head">
         <span className="eyebrow"><span className="dot" /> Admin</span>
         <h1>Administration</h1>
-        <p className="lead">Grant roles and read the audit trail. Visible to admin accounts only.</p>
+        <p className="lead">Grant roles and manage API keys. The audit trail now lives under <Link href="/security">Security</Link>, where it is filterable and searchable per event or platform-wide.</p>
       </div>
       <div className="card field">
         <div className="tabs">
           <button className={tab === "roles" ? "on" : ""} onClick={() => setTab("roles")}>Roles</button>
-          <button className={tab === "audit" ? "on" : ""} onClick={() => setTab("audit")}>Audit log</button>
           <button className={tab === "keys" ? "on" : ""} onClick={() => setTab("keys")}>API keys</button>
         </div>
-        {tab === "roles" ? <RolesTab me={me} /> : tab === "audit" ? <AuditTab /> : <KeysTab />}
+        {tab === "roles" ? <RolesTab me={me} /> : <KeysTab />}
       </div>
     </div>
   );

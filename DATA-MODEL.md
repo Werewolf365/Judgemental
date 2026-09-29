@@ -51,6 +51,8 @@ T3 voting (migration `0009_voting`):
 - events += voting_enabled bool default false, voting_close nullable UTC, voting_mode text default 'auth' (auth/email/open), comments_visibility text default 'public' (public/team)
 - ballots(id, event_id, voter_key, project_id, votes int, fp_hash?, created_at/updated_at) + unique (event_id, voter_key, project_id); voter_key is `user:<id>`, `email:<addr>` or `anon:<uuid>`
 - comments(id, event_id, project_id, author_user_id, body ≤2000, is_hidden, created_at) — hidden, never deleted
+- security_flags(id, event_id, kind, subject_type, subject, detail JSON, status open/blocked/dismissed, created/updated) + unique (event_id, kind, subject); repeats reopen
+- security_blocks(id, event_id, target_type user/voter/ip, target, reason?, created_by?, created_at, revoked_at?) — enforced on ballot casts + comment posts
 
 T4 certificates (migration `0019_certificates`):
 

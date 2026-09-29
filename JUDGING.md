@@ -126,6 +126,14 @@ coverage); calculation only after close; recalculation appends a new run
 version, never mutates. The rubric locks once judging starts; post-start
 removal deactivates instead of deleting.
 
+## Progress view
+
+`GET /events/{id}/judging` carries a `progress` block: overall completion %
+(submitted evaluations over live assignments), plus per-judge and
+per-project submitted/assigned breakdowns. The console Judges tab renders it
+as an overall bar with per-judge and per-project bars — pure counts, no
+estimates; judges with no live work read as "no work", not 0%.
+
 ## Rubric scales
 
 Each criterion declares the scale judges score against (`score_lo`/`score_hi`, default 0-10, enforced `hi > lo` at write time and by a CHECK constraint). Judge input validates into the declared range per criterion; the submitted weighted snapshot normalizes each score by its own scale first, so mixed-scale rubrics stay comparable. With default scales the snapshot reduces exactly to the old sum-of-products, and all existing snapshots are unaffected. The Bayesian scorer receives the same per-criterion scales. Scales are set in the console rubric builder (blank = 0-10) and exposed in every rubric payload.
