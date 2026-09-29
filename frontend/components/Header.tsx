@@ -40,6 +40,7 @@ export default function Header() {
             {link("/events", "Events")}
             {me && !isJudge && link("/dashboard", isOrg ? "Overview" : "Dashboard")}
             {showTeams && link("/teams", "My teams")}
+            {showTeams && link("/certificates", "My certificates")}
             {isOrg && link("/organizer", "Organize")}
             {isOrg && link("/security", "Security")}
             {isJudge && link("/judge", "Judging")}

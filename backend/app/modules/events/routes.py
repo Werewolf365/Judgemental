@@ -52,6 +52,7 @@ def event_out(e: Event) -> dict:
             "event_start": f(e.event_start), "event_end": f(e.event_end),
             "submissions_open": f(e.submissions_open), "submissions_close": f(e.submissions_close),
             "timezone": e.timezone or "UTC",
+            "certificates_enabled": e.certificates_enabled,
             "status": e.status.value if hasattr(e.status, "value") else str(e.status),
             "gallery_visibility": e.gallery_visibility.value if hasattr(e.gallery_visibility, "value") else str(e.gallery_visibility or "PUBLIC")}
 
@@ -133,6 +134,8 @@ async def patch_event(event_id: str, body: EventIn, request: Request, db: AsyncS
             err(422, "validation_error", "gallery_visibility must be PUBLIC, PARTICIPANTS or ORGANIZERS_ONLY")
     if "timezone" in vals and vals["timezone"]:
         e.timezone = str(vals["timezone"])[:64]
+    if vals.get("certificates_enabled") is not None:
+        e.certificates_enabled = vals["certificates_enabled"]
     for k, v in vals.items():
         if k in ("name", "slug") and not v:
             continue  # never wipe name/slug with an empty PATCH value

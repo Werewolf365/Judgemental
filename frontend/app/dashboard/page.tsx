@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api, fetchMe, fmtDate, type Me } from "@/lib/api";
 import { I } from "@/components/art";
 import Popup from "@/components/Popup";
+import { Pager, paginate } from "@/components/Pager";
 
 type OrgEvent = { event: any; stats: any };
 
@@ -103,7 +104,6 @@ function ParticipantHome({ me }: { me: Me }) {
   const [subs, setSubs] = useState<any[]>([]);
   const [events, setEvents] = useState<any[]>([]);
   const [msg, setMsg] = useState("");
-  const [certs, setCerts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -111,7 +111,6 @@ function ParticipantHome({ me }: { me: Me }) {
       try {
         const [t, s, e] = await Promise.all([api("/teams"), api("/submissions"), api("/public/events")]);
         setTeams(t.teams || []); setSubs(s.projects || []); setEvents(e.events || []);
-        setCerts(((await api("/certificates/mine").catch(() => ({ certificates: [] }))).certificates || []));
       } catch (e: any) { setMsg(e.message); }
       finally { setLoading(false); }
     })();
@@ -121,6 +120,10 @@ function ParticipantHome({ me }: { me: Me }) {
   const past = (iso?: string | null) => !!iso && new Date(iso).getTime() <= Date.now();
   const subByTeam: Record<string, any> = {};
   for (const s of subs) if (!subByTeam[s.team_id]) subByTeam[s.team_id] = s;
+  // Latest first: teams ordered by their project's recency (project-less last).
+  const [page, setPage] = useState(1);
+  const ordered = [...teams].sort((a, b) =>
+    (subByTeam[b.id]?.created_at || "").localeCompare(subByTeam[a.id]?.created_at || ""));
 
   if (loading) return <div className="card"><div className="skel" style={{ height: 200 }} /></div>;
 
@@ -138,7 +141,7 @@ function ParticipantHome({ me }: { me: Me }) {
             <div style={{ marginTop: 12 }}><Link href="/teams" className="btn">Go to My teams <I.arrow /></Link></div></div>
         ) : (
           <>
-            {teams.map((t) => {
+            {paginate(ordered, page).map((t) => {
               const ev = events.find((e) => e.id === t.event_id);
               const sub = subByTeam[t.id];
               const shut = past(ev?.submissions_close);
@@ -176,23 +179,9 @@ function ParticipantHome({ me }: { me: Me }) {
                 return <div style={{ marginTop: 12 }}><Link href="/submissions/new" className="btn">New project <I.arrow /></Link></div>;
               return <p className="form-note" style={{ marginTop: 12 }}>Submissions are closed for your events — nothing left to start.</p>;
             })()}
+            <Pager page={page} total={teams.length} onPage={setPage} />
           </>
         )}
-      </div>
-
-      <div className="card" style={{ marginTop: 16 }}>
-        <h2>My certificates</h2>
-        {!certs.length && <p style={{ color: "var(--muted)" }}>No event registrations yet — certificates unlock here once results are declared.</p>}
-        {certs.map((c: any) => (
-          <div key={c.event_id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "10px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>
-            <div><b>{c.event_name}</b>
-              <div style={{ fontSize: 13, color: "var(--muted)" }}>
-                {c.declared ? (c.kind === "WINNER" ? "Winner" : "Participation") : "Results not declared yet"}</div></div>
-            {c.declared
-              ? <Link href={`/certificates/${c.event_id}`} className="btn-ghost btn-sm" style={{ marginLeft: "auto" }}>View certificate</Link>
-              : <span className="badge badge-muted" style={{ marginLeft: "auto" }}>Pending</span>}
-          </div>
-        ))}
       </div>
     </div>
   );

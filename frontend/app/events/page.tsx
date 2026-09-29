@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, fetchMe, fmtDate } from "@/lib/api";
 import { I } from "@/components/art";
+import { Pager, paginate } from "@/components/Pager";
 
 type CardState = { joined: boolean; teamId: string | null };
 
@@ -14,6 +15,7 @@ export default function Events() {
   const [isStaff, setIsStaff] = useState(false);
   const [stateByEvent, setStateByEvent] = useState<Record<string, CardState>>({});
   const [notice, setNotice] = useState("");
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     (async () => {
@@ -47,14 +49,14 @@ export default function Events() {
       <div className="page-head"><span className="eyebrow"><span className="dot" /> Events</span>
         <h1>Find your hackathon</h1><p className="lead">Published events with live deadlines. Pick one, join, and start building.</p></div>
       <div className="card" style={{ display: "flex", gap: 10 }}>
-        <input aria-label="Search events" placeholder="Search events…" value={q} onChange={(e) => setQ(e.target.value)}
+        <input aria-label="Search events" placeholder="Search events…" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }}
           style={{ flex: 1, padding: "11px 13px", borderRadius: 10, border: "1px solid #c9d8e8", font: "inherit" }} />
       </div>
       {!loaded && <div className="card"><div className="skel" style={{ height: 90 }} /></div>}
       {notice && <div className="form-error">{notice}</div>}
       {loaded && !shown.length && <div className="card empty"><h3>{events.length ? "No events match" : "No published events yet"}</h3><p>{events.length ? "Try a different search." : "An organizer needs to publish one first."}</p></div>}
       <div className="grid grid-2">
-        {shown.map((e) => {
+        {paginate(shown, page).map((e) => {
           const st = stateByEvent[e.id];
           // Registration window is server-enforced; mirror it so the card
           // never offers a form that is guaranteed to bounce.
@@ -84,6 +86,7 @@ export default function Events() {
           );
         })}
       </div>
+      {loaded && !!shown.length && <div className="card"><Pager page={page} total={shown.length} onPage={setPage} /></div>}
     </div>
   );
 }

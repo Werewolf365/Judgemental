@@ -127,6 +127,8 @@ class Event(Base):
     # (0-100); the judges' share is always 100 minus it, never stored.
     crowd_blend_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
     crowd_weight = Column(Float, nullable=False, default=30, server_default="30")
+    # T4 certificates: organizer opts in; issued + shown only when on.
+    certificates_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
     created_by = Column(Text, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

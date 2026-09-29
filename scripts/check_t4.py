@@ -211,6 +211,14 @@ J(f"/events/{EV}/judging", O, "PATCH", {"judging_close": "2020-01-01T00:00:00Z"}
 s, b = J(f"/events/{EV}/results/calculate", O, "POST", {})
 check("calculated (results declared)", s == 200, f"got {s} {b}")
 
+# ---- certificates need the organizer opt-in ----
+s, b = J(f"/events/{EV}/certificate", U1)
+check("certificate requires opt-in (404)", s == 404, f"got {s} {b}")
+s, _ = J(f"/events/{EV}", P, "PATCH", {"certificates_enabled": True})
+check("toggle organizer-only (403)", s == 403, f"got {s}")
+s, b = J(f"/events/{EV}", O, "PATCH", {"certificates_enabled": True})
+check("certificates toggled on", s == 200 and b["event"].get("certificates_enabled") is True, f"got {s} {b}")
+
 # ---- certificates ----
 s, b = J(f"/events/{EV}/certificate", U1)
 check("winner certificate issued", s == 200 and b.get("kind") == "WINNER"

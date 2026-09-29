@@ -38,3 +38,5 @@ Thumbs.db
 *.swo
 .vscode/
 .idea/
+# Local demo artifacts (never commit)
+/certif demo.png

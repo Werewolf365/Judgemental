@@ -156,28 +156,25 @@ function Console() {  const [me, setMe] = useState<any>(null);
     } catch (e: any) { setMsg(e.message); }
   }
 
-  // Certificate base image (organizer-uploaded; participant details overlay it).
-  const [certTpl, setCertTpl] = useState(false);
+  // Certificate switch (organizer opts in; issuance + dashboard display
+  // follow automatically once results are declared). Tracked in its own
+  // state from the authed event endpoint: loadDetail prefers the public
+  // payload (which omits organizer-only flags), so reading the flag off
+  // `ev` would untick on published events even when it is on server-side.
+  const [certOn, setCertOn] = useState<boolean | null>(null);
   useEffect(() => {
-    if (!detail?.event?.id) { setCertTpl(false); return; }
-    api(`/events/${detail.event.id}/certificate-template`).then(() => setCertTpl(true)).catch(() => setCertTpl(false));
+    if (!detail?.event?.id) { setCertOn(null); return; }
+    api(`/events/${detail.event.id}`).then((d) => setCertOn(!!d.event?.certificates_enabled)).catch(() => setCertOn(null));
   }, [detail?.event?.id]);
-  async function uploadTemplate(file: File | undefined) {
-    if (!file || !detail) return;
+  async function saveCertFlag(on: boolean) {
+    if (!detail) return;
     setMsg("");
-    if (!file.type.startsWith("image/")) { setMsg("Template must be an image file."); return; }
-    if (file.size > 2_000_000) { setMsg("Template image too large (2MB cap)."); return; }
     try {
-      const dataUrl = await new Promise<string>((res, rej) => {
-        const fr = new FileReader();
-        fr.onload = () => res(String(fr.result));
-        fr.onerror = rej;
-        fr.readAsDataURL(file);
-      });
-      await api(`/events/${detail.event.id}/certificate-template`,
-        { method: "PUT", body: JSON.stringify({ image: dataUrl }) });
-      setCertTpl(true);
-      setMsg("Certificate template saved — issued automatically once results are declared.");
+      const d = await api(`/events/${detail.event.id}`, { method: "PATCH",
+        body: JSON.stringify({ certificates_enabled: on }) });
+      setCertOn(!!d.event?.certificates_enabled);
+      setMsg(on ? "Certificates on — participants will see them once results are declared."
+                : "Certificates off.");
     } catch (e: any) { setMsg(e.message); }
   }
 
@@ -648,16 +645,12 @@ function Console() {  const [me, setMe] = useState<any>(null);
             </div>
             <h3 style={{ marginTop: 16 }}>Certificates</h3>
             <p style={{ color: "var(--muted)", marginTop: 0 }}>
-              Upload the certificate base — participant name, event, rank and code overlay it.
-              Issued automatically once results are declared (winner = rank-1 team).</p>
-            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-              <label className="btn-ghost btn-sm" style={{ cursor: "pointer" }}>
-                {certTpl ? "Replace base image…" : "Upload base image…"}
-                <input type="file" accept="image/*" hidden
-                  onChange={(e) => { uploadTemplate(e.target.files?.[0]); e.target.value = ""; }} />
-              </label>
-              {certTpl && <span className="badge badge-ok">Base uploaded</span>}
-            </div>
+              Generated automatically once results are declared — winner for the rank-1 team,
+              participation for everyone else. They appear on each participant's dashboard.</p>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14.5 }}>
+              <input type="checkbox" checked={!!certOn} style={{ width: "auto", margin: 0 }}
+                onChange={(e) => saveCertFlag(e.target.checked)} /> Issue certificates for this event
+            </label>
             <div style={{ marginTop: 14 }}>
               <button className="btn-ghost btn-sm" onClick={() => goStep("gallery")}><I.back /> Back to gallery access</button>{" "}
               <button className="btn btn-sm" onClick={() => goStep("voting")}>Continue to voting <I.arrow /></button>

@@ -2,9 +2,11 @@
 import { useEffect, useState } from "react";
 import { api, fetchMe } from "@/lib/api";
 import { I } from "@/components/art";
+import { Pager, paginate } from "@/components/Pager";
 
 export default function TeamDetail({ params }: { params: { id: string } }) {
   const [team, setTeam] = useState<any>(null);
+  const [page, setPage] = useState(1);
   const [me, setMe] = useState<any>(null);
   const [msg, setMsg] = useState("");
   const [proj, setProj] = useState<any>(null);
@@ -75,12 +77,13 @@ export default function TeamDetail({ params }: { params: { id: string } }) {
       )}
       <div className="grid grid-2">
         <div className="card"><h2><I.team /> Members ({team.members?.length || 0})</h2>
-          {(team.members || []).map((m: any) => (
+          {paginate(team.members || [], page).map((m: any) => (
             <div key={m.user_id} style={{ display: "flex", gap: 10, padding: "8px 0", borderTop: "1px solid var(--line)" }}>
               <b>{m.display_name}</b><span style={{ color: "var(--muted)" }}>{m.email}</span>
               {m.role === "CAPTAIN" && <span className="badge badge-navy" style={{ marginLeft: "auto" }}>Captain</span>}
             </div>
           ))}
+          <Pager page={page} total={(team.members || []).length} onPage={setPage} />
         </div>
         <div className="card"><h2>Invite link</h2>
           {isCaptain ? (<><p style={{ color: "var(--muted)" }}>Share this with teammates. Regenerating revokes the previous link.</p>

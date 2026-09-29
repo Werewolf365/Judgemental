@@ -156,6 +156,8 @@ async def my_certificate(event_id: str, request: Request,
         EventParticipant.event_id == e.id, EventParticipant.user_id == user.id))
     if not res.scalars().first():
         err(404, "not_found", "No certificate: you are not registered for this event")
+    if not e.certificates_enabled:
+        err(404, "not_found", "Certificates are not enabled for this event")
     run = await _declared_run(db, e.id)
     if not run:
         err(404, "not_found", "Results are not declared yet — certificates unlock after calculation")
@@ -193,7 +195,7 @@ async def my_certificates(db: AsyncSession = Depends(get_db),
         EventParticipant.user_id == user.id).order_by(Event.created_at.desc()))
     out = []
     for part, e in res.all():
-        run = await _declared_run(db, e.id)
+        run = await _declared_run(db, e.id) if e.certificates_enabled else None
         kind = None
         code = None
         if run:

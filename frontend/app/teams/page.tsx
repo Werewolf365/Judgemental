@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api, fetchMe } from "@/lib/api";
 import { I } from "@/components/art";
 import JudgeGate from "@/components/JudgeGate";
+import { Pager, paginate } from "@/components/Pager";
 
 export default function Teams() {
   const [teams, setTeams] = useState<any[]>([]);
@@ -15,6 +16,7 @@ export default function Teams() {
   const [eventId, setEventId] = useState("");
   const [joined, setJoined] = useState<boolean | null>(null);
   const [inviteInput, setInviteInput] = useState("");
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
@@ -103,13 +105,14 @@ export default function Teams() {
       {msg && <div className="card"><p>{msg}</p></div>}
       <div className="card field">
         {!teams.length && <p style={{ color: "var(--muted)" }}>No team yet — create one below to unlock projects.</p>}
-        {teams.map((t) => (
+        {paginate(teams, page).map((t) => (
           <div key={t.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "10px 0", borderTop: "1px solid var(--line)" }}>
             <b><Link href={`/teams/${t.id}`}>{t.name}</Link></b>
             <span style={{ color: "var(--muted)" }}>— {(events.find((e) => e.id === t.event_id)?.name) || "Event"}</span>
             <button className="btn-ghost btn-sm" style={{ marginLeft: "auto" }} onClick={() => invite(t.id)}>Copy invite link</button>
           </div>
         ))}
+        <Pager page={page} total={teams.length} onPage={setPage} />
         <h3 style={{ marginTop: 16 }}>Join a team</h3>
         <p className="form-note">Got an invite link from a teammate? Paste it here.</p>
         <form onSubmit={joinWithLink} style={{ display: "flex", gap: 8 }}>

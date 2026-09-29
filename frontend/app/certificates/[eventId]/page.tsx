@@ -29,18 +29,25 @@ export default function CertificateView({ params }: { params: { eventId: string 
           position: "relative", width: "100%", aspectRatio: "4 / 3",
           background: cert.template_image
             ? `url(${cert.template_image}) center / cover no-repeat`
-            : "linear-gradient(160deg, #0a4a56 0%, #0b7d8f 52%, #34b37a 100%)",
+            : "#fdfbf3",
           display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center",
+          ...(cert.template_image ? {} : { border: "6px solid #0a4a56", outline: "2px solid #b08d38", outlineOffset: -22 }),
         }}>
+          {!cert.template_image && (
+            <div style={{ position: "absolute", right: 70, bottom: 90, width: 110, height: 110, borderRadius: "50%",
+              background: "radial-gradient(circle at 35% 30%, #e8c96a, #b08d38 75%)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "#5a3c0a", fontWeight: 800, fontSize: 13 }}>DOGFOOD</div>
+          )}
           <div style={{
             padding: "28px 40px", maxWidth: "80%",
             background: cert.template_image ? "rgba(255,255,255,.82)" : "transparent",
             borderRadius: 12,
-            color: cert.template_image ? "var(--sea-950)" : "#fff",
+            color: cert.template_image ? "var(--sea-950)" : "#0a4a56",
           }}>
             <div style={{ fontSize: 13, letterSpacing: 3, fontWeight: 700, opacity: .8 }}>
               {winner ? "WINNER" : "CERTIFICATE OF PARTICIPATION"}</div>
-            <div style={{ fontSize: 34, fontWeight: 800, margin: "8px 0" }}>{cert.display_name}</div>
+            <div style={{ fontSize: 34, fontWeight: 800, margin: "8px 0", fontFamily: "Georgia, serif" }}>{cert.display_name}</div>
             <div style={{ fontSize: 14.5 }}>
               {winner ? <>for winning <b>{cert.event_name}</b>{cert.team_name ? <> with team <b>{cert.team_name}</b></> : null}</>
                 : <>for participating in <b>{cert.event_name}</b>{cert.team_name ? <> with team <b>{cert.team_name}</b></> : null}</>}

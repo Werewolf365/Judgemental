@@ -13,6 +13,7 @@ class EventIn(BaseModel):
     submissions_close: Optional[str] = None
     gallery_visibility: Optional[str] = None
     timezone: Optional[str] = Field(default=None, max_length=64)
+    certificates_enabled: Optional[bool] = None
 
 class TrackIn(BaseModel):
     name: str = Field(max_length=100)
