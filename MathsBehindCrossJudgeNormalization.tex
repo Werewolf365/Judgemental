@@ -1,0 +1,427 @@
+% Options for packages loaded elsewhere
+\PassOptionsToPackage{unicode}{hyperref}
+\PassOptionsToPackage{hyphens}{url}
+%
+\documentclass[
+  11pt,
+]{article}
+\usepackage{amsmath,amssymb}
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{textcomp} % provide euro and other symbols
+\else % if luatex or xetex
+  \usepackage{unicode-math} % this also loads fontspec
+  \defaultfontfeatures{Scale=MatchLowercase}
+  \defaultfontfeatures[\rmfamily]{Ligatures=TeX,Scale=1}
+\fi
+\ifPDFTeX\else
+  % xetex/luatex font selection
+  \setmainfont[]{DejaVu Serif}
+  \setsansfont[]{DejaVu Sans}
+  \setmonofont[]{DejaVu Sans Mono}
+\fi
+% Use upquote if available, for straight quotes in verbatim environments
+\IfFileExists{upquote.sty}{\usepackage{upquote}}{}
+\IfFileExists{microtype.sty}{% use microtype if available
+  \usepackage[]{microtype}
+  \UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
+}{}
+\makeatletter
+\@ifundefined{KOMAClassName}{% if non-KOMA class
+  \IfFileExists{parskip.sty}{%
+    \usepackage{parskip}
+  }{% else
+    \setlength{\parindent}{0pt}
+    \setlength{\parskip}{6pt plus 2pt minus 1pt}}
+}{% if KOMA class
+  \KOMAoptions{parskip=half}}
+\makeatother
+\usepackage{xcolor}
+\usepackage[margin=1in]{geometry}
+\usepackage{color}
+\usepackage{fancyvrb}
+\newcommand{\VerbBar}{|}
+\newcommand{\VERB}{\Verb[commandchars=\\\{\}]}
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{commandchars=\\\{\}}
+% Add ',fontsize=\small' for more characters per line
+\newenvironment{Shaded}{}{}
+\newcommand{\AlertTok}[1]{\textcolor[rgb]{1.00,0.00,0.00}{\textbf{#1}}}
+\newcommand{\AnnotationTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\newcommand{\AttributeTok}[1]{\textcolor[rgb]{0.49,0.56,0.16}{#1}}
+\newcommand{\BaseNTok}[1]{\textcolor[rgb]{0.25,0.63,0.44}{#1}}
+\newcommand{\BuiltInTok}[1]{\textcolor[rgb]{0.00,0.50,0.00}{#1}}
+\newcommand{\CharTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\CommentTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textit{#1}}}
+\newcommand{\CommentVarTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\newcommand{\ConstantTok}[1]{\textcolor[rgb]{0.53,0.00,0.00}{#1}}
+\newcommand{\ControlFlowTok}[1]{\textcolor[rgb]{0.00,0.44,0.13}{\textbf{#1}}}
+\newcommand{\DataTypeTok}[1]{\textcolor[rgb]{0.56,0.13,0.00}{#1}}
+\newcommand{\DecValTok}[1]{\textcolor[rgb]{0.25,0.63,0.44}{#1}}
+\newcommand{\DocumentationTok}[1]{\textcolor[rgb]{0.73,0.13,0.13}{\textit{#1}}}
+\newcommand{\ErrorTok}[1]{\textcolor[rgb]{1.00,0.00,0.00}{\textbf{#1}}}
+\newcommand{\ExtensionTok}[1]{#1}
+\newcommand{\FloatTok}[1]{\textcolor[rgb]{0.25,0.63,0.44}{#1}}
+\newcommand{\FunctionTok}[1]{\textcolor[rgb]{0.02,0.16,0.49}{#1}}
+\newcommand{\ImportTok}[1]{\textcolor[rgb]{0.00,0.50,0.00}{\textbf{#1}}}
+\newcommand{\InformationTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\newcommand{\KeywordTok}[1]{\textcolor[rgb]{0.00,0.44,0.13}{\textbf{#1}}}
+\newcommand{\NormalTok}[1]{#1}
+\newcommand{\OperatorTok}[1]{\textcolor[rgb]{0.40,0.40,0.40}{#1}}
+\newcommand{\OtherTok}[1]{\textcolor[rgb]{0.00,0.44,0.13}{#1}}
+\newcommand{\PreprocessorTok}[1]{\textcolor[rgb]{0.74,0.48,0.00}{#1}}
+\newcommand{\RegionMarkerTok}[1]{#1}
+\newcommand{\SpecialCharTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\SpecialStringTok}[1]{\textcolor[rgb]{0.73,0.40,0.53}{#1}}
+\newcommand{\StringTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\VariableTok}[1]{\textcolor[rgb]{0.10,0.09,0.49}{#1}}
+\newcommand{\VerbatimStringTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\WarningTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\usepackage{longtable,booktabs,array}
+\usepackage{calc} % for calculating minipage widths
+% Correct order of tables after \paragraph or \subparagraph
+\usepackage{etoolbox}
+\makeatletter
+\patchcmd\longtable{\par}{\if@noskipsec\mbox{}\fi\par}{}{}
+\makeatother
+% Allow footnotes in longtable head/foot
+\IfFileExists{footnotehyper.sty}{\usepackage{footnotehyper}}{\usepackage{footnote}}
+\makesavenoteenv{longtable}
+\setlength{\emergencystretch}{3em} % prevent overfull lines
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\setcounter{secnumdepth}{-\maxdimen} % remove section numbering
+\ifLuaTeX
+  \usepackage{selnolig}  % disable illegal ligatures
+\fi
+\IfFileExists{bookmark.sty}{\usepackage{bookmark}}{\usepackage{hyperref}}
+\IfFileExists{xurl.sty}{\usepackage{xurl}}{} % add URL line breaks if available
+\urlstyle{same}
+\hypersetup{
+  hidelinks,
+  pdfcreator={LaTeX via pandoc}}
+
+\author{}
+\date{}
+
+\begin{document}
+
+\hypertarget{the-maths-behind-normalization}{%
+\section{The Maths Behind
+Normalization}\label{the-maths-behind-normalization}}
+
+How this platform puts judges who score on different personal scales
+onto one common scale --- stated exactly, then proved on the real
+\texttt{fixtures.json} data.
+
+\hypertarget{the-problem-measured}{%
+\subsection{1. The problem, measured}\label{the-problem-measured}}
+
+\texttt{fixtures.json} holds 126 evaluations of 41 projects by 30
+judges, each scored 2--5 on functionality / quality / innovation. The
+judges do not share a scale:
+
+\begin{longtable}[]{@{}llll@{}}
+\toprule\noalign{}
+judge & mean given & spread (sd) & evaluations \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+jdg\_01 & 2.00 & 0.00 & 1 \\
+jdg\_14 & 3.00 & 0.67 & 3 \\
+jdg\_27 & 3.00 & 0.47 & 2 \\
+\ldots{} & \ldots{} & \ldots{} & \ldots{} \\
+jdg\_15 & 4.06 & 0.83 & 6 \\
+jdg\_30 & 4.08 & 0.57 & 4 \\
+jdg\_02 & 4.22 & 0.81 & 6 \\
+\end{longtable}
+
+The strictest judge averages \textbf{2.00}, the most lenient
+\textbf{4.22} --- a 2.2-point gap on a 4-point scale. A raw average
+confounds \emph{project quality} with \emph{who happened to judge it}: a
+project seen only by harsh judges looks bad, one seen by two lenient
+judges looks elite. That is the entire problem normalization has to
+solve, and averaging cannot solve it by construction.
+
+\hypertarget{the-method-what-the-code-actually-does}{%
+\subsection{2. The method (what the code actually
+does)}\label{the-method-what-the-code-actually-does}}
+
+Normalization here is not one trick but five stages, each removing one
+way a judge's personal scale can leak into the ranking. Code pointers
+are exact.
+
+\hypertarget{stage-1-criterion-averaging-score_evaluation-hier_score.py}{%
+\subsubsection{\texorpdfstring{Stage 1 --- Criterion averaging
+(\texttt{score\_evaluation},
+\texttt{hier\_score.py})}{Stage 1 --- Criterion averaging (score\_evaluation, hier\_score.py)}}\label{stage-1-criterion-averaging-score_evaluation-hier_score.py}}
+
+One evaluation's criterion scores become a single number (mean under
+equal weights here --- fixtures define no weights, so shares are
+uniform; organizer weights are normalized to sum 1 in production).
+Per-criterion scales (\texttt{score\_lo}/\texttt{score\_hi}, migration
+\texttt{0016}) map every criterion to 0--1 first, so a 1--5 rubric and a
+0--10 rubric are comparable before weighting.
+
+\hypertarget{stage-2-pairwise-conversion-generate_pairs-pairwise.py}{%
+\subsubsection{\texorpdfstring{Stage 2 --- Pairwise conversion
+(\texttt{generate\_pairs},
+\texttt{pairwise.py})}{Stage 2 --- Pairwise conversion (generate\_pairs, pairwise.py)}}\label{stage-2-pairwise-conversion-generate_pairs-pairwise.py}}
+
+Each judge's scores become \textbf{within-judge pairwise orderings}: for
+every pair of projects a judge scored, the higher-scored one wins. This
+is where absolute scale dies --- a judge scoring (2, 3, 4) and one
+scoring (60, 70, 80) produce the \emph{identical} evidence. Three rules
+keep it honest:
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Unit weights, always.} Every comparison carries weight 1.0,
+  enforced by a database CHECK constraint as well as in code. Score
+  \emph{margins} never become evidence weights --- otherwise a judge
+  using a wide scale would outvote a careful one purely for being loud.
+\item
+  \textbf{Ties produce nothing.} Scores within 1e-9 emit no observation
+  (the epsilon exists because weights like 0.35 aren't binary-exact;
+  crowning a winner on float dust would be fabrication).
+\item
+  \textbf{Snapshots, not live reads.} Pairs are built from stored
+  weighted scores, so later rubric edits can never reinterpret history.
+\end{itemize}
+
+\hypertarget{stage-3-reliability-weighted-map-fit-fit-crowd_bt.py}{%
+\subsubsection{\texorpdfstring{Stage 3 --- Reliability-weighted MAP fit
+(\texttt{fit},
+\texttt{crowd\_bt.py})}{Stage 3 --- Reliability-weighted MAP fit (fit, crowd\_bt.py)}}\label{stage-3-reliability-weighted-map-fit-fit-crowd_bt.py}}
+
+Model:
+\texttt{P\_j(A\ \textgreater{}\ B)\ =\ sigmoid(r\_j\ ·\ (θ\_A\ −\ θ\_B))},
+judge reliability \texttt{r\_j\ =\ exp(log\ r\_j)}, priors
+\texttt{θ\ \textasciitilde{}\ N(0,\ 2²)},
+\texttt{log\ r\_j\ \textasciitilde{}\ N(μ\_j,\ σ\_j²)} with cross-event
+historical or neutral \texttt{(0,\ 0.60)} priors. Fitted by BFGS from
+zeros with an analytic gradient.
+
+Two normalizing effects live here. First, \textbf{reliability pools
+agreement, not scale}: a judge whose orderings agree with the consensus
+gets high \texttt{r} regardless of whether they score 1--5 or 0--100; a
+contrarian's \texttt{r} collapses toward 0 and their pairs stop moving
+the ranking (demonstrated adversarially in
+\texttt{scripts/validate\_ranking.py} experiment 3: inverted judge → r ≈
+0.36 vs ≈1.97 for consistent judges). Second, \textbf{the θ prior
+shrinks thin evidence}: a project with two evaluations cannot stray far
+from 0 no matter its raw scores --- absence of evidence is reported as
+modesty, not confidence.
+
+\hypertarget{stage-4-sum-to-zero-reporting-crowd_bt.py-rank}{%
+\subsubsection{\texorpdfstring{Stage 4 --- Sum-to-zero reporting
+(\texttt{crowd\_bt.py},
+\texttt{rank})}{Stage 4 --- Sum-to-zero reporting (crowd\_bt.py, rank)}}\label{stage-4-sum-to-zero-reporting-crowd_bt.py-rank}}
+
+The BT likelihood depends only on \emph{differences}, so reported thetas
+are centered (reference project included in the mean). Rankings, gaps
+and probabilities are therefore symmetric and stable across
+recalculations.
+
+\hypertarget{stage-5-laplace-uncertainty-same-file}{%
+\subsubsection{Stage 5 --- Laplace uncertainty (same
+file)}\label{stage-5-laplace-uncertainty-same-file}}
+
+The full inverse-Hessian theta block propagates through the centering
+shift --- including the reference project, which is no longer special
+after Stage 4 --- giving every project an honest marginal std, pairwise
+\texttt{P(A\textgreater{}B)} flags, and High/Low confidence. Stated
+assumption: thetas are treated as independent Gaussians for pairwise
+probabilities (posterior correlations are dropped; useful as a flagging
+heuristic, not calibrated odds).
+
+\hypertarget{the-second-opinion-severity-pooling-hier_score.py}{%
+\subsubsection{\texorpdfstring{The second opinion: severity pooling
+(\texttt{hier\_score.py})}{The second opinion: severity pooling (hier\_score.py)}}\label{the-second-opinion-severity-pooling-hier_score.py}}
+
+Where BT needs pairs, the edge-case Bayesian model
+(\texttt{R\ =\ θ\ +\ b\ +\ ε}, EM variance components, v2) estimates an
+explicit per-judge severity \texttt{b\_j} with partial pooling --- a
+judge seen once collapses to the population instead of absorbing project
+spread. It is a different estimator of the same correction, and §4
+checks they agree on fixtures.
+
+\hypertarget{theorem-affine-invariance-sketch}{%
+\subsection{3. Theorem (affine invariance,
+sketch)}\label{theorem-affine-invariance-sketch}}
+
+\textbf{Claim.} Let one judge's scores undergo any strictly increasing
+affine map \texttt{x\ ↦\ ax\ +\ b}, \texttt{a\ \textgreater{}\ 0}. Then
+the fitted thetas are \emph{exactly} unchanged.
+
+\textbf{Proof.} (i) The map preserves strict order, so
+\texttt{generate\_pairs} emits a byte-identical pair set (ties map to
+ties: \texttt{ax+b} preserves equality too). (ii) The MAP objective
+depends on the data only through that pair set (unit weights, no margins
+anywhere), with identical priors, reference, and start point. (iii) BFGS
+is deterministic given identical objective/gradient/start, so the
+optimum --- and hence every reported theta --- is identical. \ensuremath{\blacksquare}
+
+Corollaries a statistician should verify rather than take on faith: the
+claim covers affine maps only (a judge who \emph{reorders} projects
+changes the evidence --- correctly so); reliability posteriors are
+likewise invariant since they see the same pairs; the θ prior introduces
+mild shrinkage but no scale dependence.
+
+\hypertarget{proof-on-fixtures.json-ran-not-asserted}{%
+\subsection{\texorpdfstring{4. Proof on \texttt{fixtures.json} (ran, not
+asserted)}{4. Proof on fixtures.json (ran, not asserted)}}\label{proof-on-fixtures.json-ran-not-asserted}}
+
+Pipeline: 126 fixture scores → criterion means → 254 pairs over 41
+projects → BFGS MAP (\texttt{crowd-bt-map-v3}, neutral priors, reference
+\texttt{prj\_01}, converged in 51 iterations). Raw baseline: plain mean
+of criterion-means per project.
+
+\textbf{Raw ranking (naive mean):}
+
+\begin{longtable}[]{@{}llll@{}}
+\toprule\noalign{}
+\# & project & raw mean & evaluations \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+1 & prj\_11 & 4.333 & 3 \\
+2 & prj\_34 & 4.333 & 3 \\
+3 & prj\_10 & 4.167 & 2 \\
+4 & prj\_25 & 4.111 & 3 \\
+5 & prj\_37 & 4.083 & 3 \\
+\end{longtable}
+
+\textbf{Normalized ranking (Crowd-BT θ):}
+
+\begin{longtable}[]{@{}llll@{}}
+\toprule\noalign{}
+\# & project & θ & raw \# \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+1 & prj\_34 & +2.246 & 2 \\
+2 & prj\_37 & +1.629 & 5 \\
+3 & prj\_07 & +1.405 & 31 \\
+4 & prj\_11 & +1.324 & 1 \\
+5 & prj\_25 & +1.281 & 4 \\
+\end{longtable}
+
+Bottom agrees too (BT: prj\_20, prj\_05, prj\_23; raw: prj\_40, prj\_05,
+prj\_23). Related but not identical --- Kendall τ = \textbf{0.563},
+top-5 overlap \textbf{4/5} --- which is the point: raw means confound
+judge scale, BT removes it. Twenty-one of 41 projects move ≥ 5 places
+between the two rankings.
+
+\textbf{Worked example --- prj\_07 (raw \#31 → normalized \#3).} Its
+five scores:
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2500}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+judge
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+gave
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+judge's overall mean
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+reading
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+jdg\_01 & 2.00 & 2.00 (only score ever given) & harsh judge,
+uninformative level \\
+jdg\_19 & 2.33 & 3.33 & a full point below their norm --- real signal
+\emph{against} \\
+jdg\_21 & 3.67 & 3.67 & neutral \\
+jdg\_12 & 4.00 & 3.50 & half point \emph{above} their norm --- signal
+\emph{for} \\
+jdg\_26 & 4.67 & 3.70 & a full point above their norm --- strong signal
+\emph{for} \\
+\end{longtable}
+
+The raw mean (3.33) lets jdg\_01's lone 2.00 and jdg\_19's low score
+dominate. The pairwise view sees what matters: three judges placed
+prj\_07 \emph{above} peers they scored in the same sitting. Absolute
+levels cancel; relative placements accumulate. Conversely prj\_10 (raw
+\#3 → \#16) rested on two evaluations, and the θ prior correctly refuses
+to crown thin evidence.
+
+\textbf{Affine-invariance check on the same data.} Mapping jdg\_08's
+scores 2--5 → 10--100 (\texttt{30x\ −\ 50}, strictly increasing): pair
+sets byte-identical, fitted thetas differ by \textbf{0.00e+00} (max over
+41 projects), reliabilities unchanged to 4 decimals (jdg\_08 1.1441,
+jdg\_19 0.5648, jdg\_12 1.0844). The wider scale bought jdg\_08 exactly
+nothing --- as §3 predicts.
+
+\textbf{Cross-model check.} The hierarchical scorer independently
+recovers the same leniency ordering (most lenient: jdg\_02, jdg\_15,
+jdg\_30 by both raw means and posterior severity \texttt{b}), with
+effects heavily shrunk (±0.25) under thin replication --- two different
+estimators, one agreed correction.
+
+\hypertarget{what-normalization-does-not-do-read-before-citing-this-doc}{%
+\subsection{5. What normalization does NOT do (read before citing this
+doc)}\label{what-normalization-does-not-do-read-before-citing-this-doc}}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{No cross-component miracles.} Projects sharing no judge path
+  sit on no common scale; the pipeline refuses to fit
+  (\texttt{connected\_components} gate) rather than invent a ranking.
+  Normalization aligns scales, it does not create evidence.
+\item
+  \textbf{Thin evidence stays modest.} Few evaluations → posterior hugs
+  the prior; prj\_10's demotion is the feature working, but it means a
+  genuinely great project seen twice cannot outrank a good one seen ten
+  times.
+\item
+  \textbf{Reliability is agreement, not accuracy.} A panel of
+  correlated-but-wrong judges (shared misconception, leaked rubric)
+  would mutually reinforce. The adversary test covers inversion, not
+  collusion.
+\item
+  \textbf{Reference dependence is mild, not zero.} Sum-to-zero makes
+  \emph{reporting} shift-invariant, but the fitted optimum still feels
+  the reference through the prior (re-demonstrated in context §42) ---
+  second-order, disclosed.
+\item
+  \textbf{History transfer is mean-only.} Cross-event priors carry
+  posterior means with neutral width (MAP has no posterior variance to
+  propagate).
+\end{itemize}
+
+\hypertarget{reproduce-it}{%
+\subsection{6. Reproduce it}\label{reproduce-it}}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# inside the api container (offline{-}safe, numpy/scipy baked into the image):}
+\ExtensionTok{docker}\NormalTok{ compose exec }\AttributeTok{{-}T}\NormalTok{ api python3 }\AttributeTok{{-}} \OperatorTok{\textless{}}\NormalTok{ /tmp/norm\_probe.py   }\CommentTok{\# §4 tables}
+\ExtensionTok{docker}\NormalTok{ compose exec }\AttributeTok{{-}T}\NormalTok{ api python3 }\AttributeTok{{-}} \OperatorTok{\textless{}}\NormalTok{ /tmp/norm\_tail.py    }\CommentTok{\# invariance + severity}
+\ExtensionTok{docker}\NormalTok{ compose exec }\AttributeTok{{-}T}\NormalTok{ api python }\AttributeTok{{-}} \OperatorTok{\textless{}}\NormalTok{ scripts/validate\_ranking.py  }\CommentTok{\# 10/10 incl. scale{-}invariance + adversary}
+\end{Highlighting}
+\end{Shaded}
+
+Code:
+\texttt{backend/app/modules/judging/\{pairwise,crowd\_bt,hier\_score,reliability\}.py}.
+Method reference: \texttt{JUDGING.md} (§model v3, Laplace, rubric
+scales, blend normalization),
+\texttt{crowd\_bt\_architecture\_poc\_corrected.md} (original design;
+note its §15/§16 magnitudes encode the removed margin weighting ---
+evidence tables and orderings only). Doc versions:
+\texttt{crowd-bt-map-v3}, \texttt{hier-bayes-score-v2}.
+
+\end{document}
