@@ -22,10 +22,13 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from app.database import get_db
-from app.models import AuditLog, User
+from app.models import ApiKey, AuditLog, User
 from app.modules.auth.dependencies import require_roles
+from app.shared.apikeys import SCOPES
 from app.shared.audit import record
+from app.shared.clock import utcnow
 from app.shared.errors import err
+from app.shared.security import sha256_hex
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -164,3 +167,94 @@ async def read_audit(action: str = Query("", max_length=80), actor_id: str = Que
         "total": total, "limit": limit, "offset": offset,
         "actions": list(distinct),
     }
+
+
+def _key_out(k: ApiKey, email: str | None) -> dict:
+    f = lambda x: x.isoformat() if x else None
+    return {"id": k.id, "user_email": email, "name": k.name,
+            "scopes": list(k.scopes or []), "created_at": f(k.created_at),
+            "expires_at": f(k.expires_at), "last_used_at": f(k.last_used_at),
+            "revoked_at": f(k.revoked_at)}
+
+
+@router.get("/api-keys")
+async def list_keys(db: AsyncSession = Depends(get_db),
+                    user: User = Depends(require_roles("ADMIN"))):
+    """Every API key on the platform with owner, scopes and status."""
+    rows = (await db.execute(
+        select(ApiKey, User.email).join(User, User.id == ApiKey.user_id).order_by(
+            ApiKey.created_at.desc()))).all()
+    return {"keys": [_key_out(k, em) for k, em in rows], "scopes": list(SCOPES)}
+
+
+class ApiKeyIn(BaseModel):
+    """Mint a scoped bearer token for an account. The raw token is returned
+    once — it cannot be read back afterwards."""
+    email: Optional[str] = Field(default="", max_length=320)
+    user_id: Optional[str] = Field(default=None, max_length=64)
+    name: str = Field(min_length=1, max_length=100)
+    scopes: list[str] = Field(min_length=1, max_length=20)
+    expires_in_days: Optional[int] = Field(default=None, ge=1, le=3650)
+
+    @field_validator("email")
+    @classmethod
+    def _email(cls, v):
+        return (v or "").strip().lower()
+
+    @field_validator("user_id")
+    @classmethod
+    def _user_id(cls, v):
+        return (v or "").strip() or None
+
+    @field_validator("scopes")
+    @classmethod
+    def _scopes(cls, v):
+        bad = [s for s in v if s not in SCOPES]
+        if bad:
+            raise ValueError(f"unknown scope(s): {', '.join(bad)}")
+        return sorted(set(v))
+
+
+@router.post("/api-keys")
+async def create_key(body: ApiKeyIn, request: Request, db: AsyncSession = Depends(get_db),
+                     user: User = Depends(require_roles("ADMIN"))):
+    if not body.email and not body.user_id:
+        err(422, "validation_error", "Provide the account's email or user_id")
+    stmt = select(User).where(User.email_norm == body.email) if body.email \
+        else select(User).where(User.id == body.user_id)
+    target = (await db.execute(stmt)).scalar_one_or_none()
+    if not target:
+        err(404, "not_found", "No such account")
+    import secrets as _secrets
+    from datetime import timedelta
+    raw = f"dgf_{_secrets.token_urlsafe(32)}"
+    import uuid as _uuid
+    k = ApiKey(id=_uuid.uuid4().hex, user_id=target.id, name=body.name.strip(),
+               token_hash=sha256_hex(raw), scopes=body.scopes,
+               expires_at=(utcnow() + timedelta(days=body.expires_in_days)
+                           if body.expires_in_days else None))
+    db.add(k)
+    await db.commit()
+    await db.refresh(k)
+    await record(user, "apikey.created", target_type="api_key", target_id=k.id,
+                 detail={"owner": target.email, "scopes": body.scopes,
+                         "name": k.name}, request=request)
+    out = _key_out(k, target.email)
+    out["token"] = raw
+    return out
+
+
+@router.delete("/api-keys/{key_id}")
+async def revoke_key(key_id: str, request: Request, db: AsyncSession = Depends(get_db),
+                     user: User = Depends(require_roles("ADMIN"))):
+    """Revoke (never hard-delete — the audit trail stays joinable)."""
+    k = await db.get(ApiKey, key_id)
+    if not k or k.revoked_at is not None:
+        err(404, "not_found", "No such active key")
+    k.revoked_at = utcnow()
+    await db.commit()
+    owner = await db.get(User, k.user_id)
+    await record(user, "apikey.revoked", target_type="api_key", target_id=k.id,
+                 detail={"owner": owner.email if owner else None, "name": k.name},
+                 request=request)
+    return {"ok": True}

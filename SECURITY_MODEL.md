@@ -76,7 +76,24 @@ no database client needed. Security-relevant refusals (rate limits,
 duplicates, role-change denials, failed logins) are recorded, not just
 successes.
 
-## 6. Residual risks (accepted, not oversights)
+## 6. API keys (T4 API-first)
+
+Scoped bearer tokens for external integrations, managed in the admin
+console (Administration → API keys):
+
+- A key authenticates **as its owner**: role checks and event scoping apply
+  unchanged; scopes further restrict by area (`events/judging/voting/
+  transfer/admin`, each `:read`/`:write`, write implying read).
+- Send as `Authorization: Bearer <token>`; `GET /auth/me` works as a whoami.
+  Cookie sessions are never scope-checked, and keys are refused on all
+  other `/auth/*` endpoints.
+- Only the SHA-256 hash is stored — the raw token is shown once at creation.
+  Revocation is a timestamp (audit stays joinable); expiry is optional;
+  `last_used_at` tracks activity for stale-key cleanup.
+- Creation, revocation are admin-only and audited (`apikey.created`,
+  `apikey.revoked`); the key list shows owner, scopes, expiry, last use.
+
+## 7. Residual risks (accepted, not oversights)
 
 - **Email mode** trusts self-asserted addresses (no mail infrastructure to
   verify); plus-addressing multiplies identities.

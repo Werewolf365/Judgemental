@@ -587,3 +587,23 @@ class Certificate(Base):
     rank = Column(Integer, nullable=True)
     code = Column(Text, nullable=False, unique=True, index=True)
     issued_at = Column(DateTime(timezone=True), default=utcnow)
+
+class ApiKey(Base):
+    """Scoped bearer token for external integrations (T4 API-first).
+
+    Authenticates AS the owning user: role checks and event scoping apply
+    unchanged, and `scopes` further restrict which areas the token may
+    touch (see shared/apikeys.py). Only the SHA-256 hash is stored — the
+    raw token is shown once at creation and never again. Revocation is a
+    timestamp (keeps the audit trail joinable); expiry is optional.
+    """
+    __tablename__ = "api_keys"
+    id = Column(Text, primary_key=True, default=_uuid)
+    user_id = Column(Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(Text, nullable=False)
+    token_hash = Column(Text, nullable=False, unique=True, index=True)
+    scopes = Column(JSON, nullable=False, default=list, server_default="[]")
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)

@@ -1,6 +1,6 @@
 import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from app.database import engine
@@ -19,6 +19,13 @@ from app.modules.voting.routes import router as voting_router
 from app.modules.certs.routes import router as certs_router
 from app.modules.transfer.routes import router as transfer_router
 from app.modules.judging import scheduler as auto_assign
+from app.shared.apikeys import require_scope
+
+# require_scope on every router: cookie/anonymous traffic passes through
+# untouched (each route's own auth decides); presented bearer API keys must
+# additionally hold the scope for the path+method. One place, no per-route
+# edits to forget.
+_SCOPED = {"dependencies": [Depends(require_scope)]}
 
 
 @asynccontextmanager
@@ -41,19 +48,19 @@ async def health():
         logging.getLogger("dogfood.health").exception("healthcheck failed")
         return JSONResponse(status_code=503, content={"ok": False, "error": "database unreachable"})
 
-app.include_router(auth_router)
-app.include_router(admin_router)
-app.include_router(events_router)
-app.include_router(teams_router)
-app.include_router(sub_router)
-app.include_router(gallery_router)
-app.include_router(judging_router)
-app.include_router(judge_router)
-app.include_router(results_router)
-app.include_router(bayes_router)
-app.include_router(voting_router)
-app.include_router(certs_router)
-app.include_router(transfer_router)
+app.include_router(auth_router, **_SCOPED)
+app.include_router(admin_router, **_SCOPED)
+app.include_router(events_router, **_SCOPED)
+app.include_router(teams_router, **_SCOPED)
+app.include_router(sub_router, **_SCOPED)
+app.include_router(gallery_router, **_SCOPED)
+app.include_router(judging_router, **_SCOPED)
+app.include_router(judge_router, **_SCOPED)
+app.include_router(results_router, **_SCOPED)
+app.include_router(bayes_router, **_SCOPED)
+app.include_router(voting_router, **_SCOPED)
+app.include_router(certs_router, **_SCOPED)
+app.include_router(transfer_router, **_SCOPED)
 
 @app.get("/projects")
 async def compat_gallery():
